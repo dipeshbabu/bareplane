@@ -38,10 +38,10 @@ type Spec struct {
 }
 
 type Provider struct {
-	Type     string                `yaml:"type"`
-	Endpoint string                `yaml:"endpoint,omitempty"`
-	Targets  []string              `yaml:"targets,omitempty"`
-	Proxmox  *ProxmoxProvisioning  `yaml:"proxmox,omitempty"`
+	Type     string               `yaml:"type"`
+	Endpoint string               `yaml:"endpoint,omitempty"`
+	Targets  []string             `yaml:"targets,omitempty"`
+	Proxmox  *ProxmoxProvisioning `yaml:"proxmox,omitempty"`
 }
 
 type ProxmoxProvisioning struct {
