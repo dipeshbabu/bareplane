@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -98,11 +99,11 @@ func TestCheckReportsConnectionFailureWithoutDetails(t *testing.T) {
 
 func TestReadSSHBannerRejectsInvalidResponses(t *testing.T) {
 	cases := map[string]string{
-		"non ssh":       "HTTP/1.1 200 OK\r\n",
-		"lf only":       "SSH-2.0-test\n",
-		"truncated":     "SSH-2.0-test",
-		"oversized":     strings.Repeat("A", MaxBannerBytes),
-		"unsupported":   "SSH-1.5-old\r\n",
+		"non ssh":     "HTTP/1.1 200 OK\r\n",
+		"lf only":     "SSH-2.0-test\n",
+		"truncated":   "SSH-2.0-test",
+		"oversized":   strings.Repeat("A", MaxBannerBytes),
+		"unsupported": "SSH-1.5-old\r\n",
 	}
 	for name, banner := range cases {
 		t.Run(name, func(t *testing.T) {
