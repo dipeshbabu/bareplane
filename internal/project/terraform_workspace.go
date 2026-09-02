@@ -10,14 +10,15 @@ import (
 const privateDirectoryMode os.FileMode = 0o700
 
 type TerraformWorkspace struct {
-	ProjectRoot     string
-	GeneratedDir    string
-	StateDir        string
-	DataDir         string
-	StateFile       string
-	StateBackupFile string
-	LockFile        string
-	PlanFile        string
+	ProjectRoot      string
+	GeneratedDir     string
+	StateDir         string
+	DataDir          string
+	StateFile        string
+	StateBackupFile  string
+	LockFile         string
+	PlanFile         string
+	PlanManifestFile string
 }
 
 func TerraformWorkspaceFor(configPath string) (TerraformWorkspace, error) {
@@ -34,14 +35,15 @@ func TerraformWorkspaceFor(configPath string) (TerraformWorkspace, error) {
 	stateDir := filepath.Join(bareplaneRoot, "state", "terraform")
 
 	return TerraformWorkspace{
-		ProjectRoot:     root,
-		GeneratedDir:    filepath.Join(bareplaneRoot, "terraform"),
-		StateDir:        stateDir,
-		DataDir:         filepath.Join(stateDir, "data"),
-		StateFile:       filepath.Join(stateDir, "terraform.tfstate"),
-		StateBackupFile: filepath.Join(stateDir, "terraform.tfstate.backup"),
-		LockFile:        filepath.Join(stateDir, ".terraform.lock.hcl"),
-		PlanFile:        filepath.Join(stateDir, "terraform.tfplan"),
+		ProjectRoot:      root,
+		GeneratedDir:     filepath.Join(bareplaneRoot, "terraform"),
+		StateDir:         stateDir,
+		DataDir:          filepath.Join(stateDir, "data"),
+		StateFile:        filepath.Join(stateDir, "terraform.tfstate"),
+		StateBackupFile:  filepath.Join(stateDir, "terraform.tfstate.backup"),
+		LockFile:         filepath.Join(stateDir, ".terraform.lock.hcl"),
+		PlanFile:         filepath.Join(stateDir, "terraform.tfplan"),
+		PlanManifestFile: filepath.Join(stateDir, "terraform-plan.json"),
 	}, nil
 }
 
