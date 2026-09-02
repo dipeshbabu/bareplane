@@ -10,12 +10,16 @@ import (
 	"github.com/dipeshbabu/bareplane/internal/provider/proxmox"
 )
 
-type ProbeDependencies struct {
+type ProviderDependencies struct {
 	LookupEnv  proxmox.LookupEnvFunc
 	HTTPClient *http.Client
 }
 
-func ProviderProbe(deps ProbeDependencies) doctor.ProviderProbe {
+// ProbeDependencies is retained as an alias because provider probes and
+// provider discovery use the same runtime dependency boundary.
+type ProbeDependencies = ProviderDependencies
+
+func ProviderProbe(deps ProviderDependencies) doctor.ProviderProbe {
 	return func(ctx context.Context, cfg config.Config) doctor.Result {
 		switch cfg.Spec.Provider.Type {
 		case proxmox.Type:
@@ -30,7 +34,7 @@ func ProviderProbe(deps ProbeDependencies) doctor.ProviderProbe {
 	}
 }
 
-func probeProxmox(ctx context.Context, providerConfig config.Provider, deps ProbeDependencies) doctor.Result {
+func probeProxmox(ctx context.Context, providerConfig config.Provider, deps ProviderDependencies) doctor.Result {
 	credentials, err := proxmox.CredentialsFromEnv(deps.LookupEnv)
 	if err != nil {
 		return doctor.Result{
