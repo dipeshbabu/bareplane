@@ -45,7 +45,6 @@ func readTerraformVersion(
 
 	var version terraformVersionOutput
 	decoder := json.NewDecoder(bytes.NewReader(stdout.data))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&version); err != nil {
 		return "", fmt.Errorf("decode terraform version output: %w", err)
 	}
@@ -80,14 +79,15 @@ type limitedBuffer struct {
 }
 
 func (w *limitedBuffer) Write(p []byte) (int, error) {
-	if len(w.data) < maxTerraformVersionOutputBytes {
-		remaining := maxTerraformVersionOutputBytes - len(w.data)
-		if remaining > len(p) {
-			remaining = len(p)
+	available := maxTerraformVersionOutputBytes - len(w.data)
+	if available > 0 {
+		copyBytes := len(p)
+		if copyBytes > available {
+			copyBytes = available
 		}
-		w.data = append(w.data, p[:remaining]...)
+		w.data = append(w.data, p[:copyBytes]...)
 	}
-	if len(p) > maxTerraformVersionOutputBytes-len(w.data) {
+	if len(p) > available {
 		w.exceeded = true
 	}
 	return len(p), nil
