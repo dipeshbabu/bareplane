@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -51,7 +52,7 @@ func TestPlanRunsOnlyInitAndPlanAndTreatsExitTwoAsChanges(t *testing.T) {
 			TokenSecret: "top-secret",
 		},
 		BaseEnvironment: []string{"PATH=/bin", "PROXMOX_VE_API_TOKEN=stale", "TF_DATA_DIR=stale"},
-		Runner:          runner,
+		Runner:          withTerraformVersion(runner),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -88,13 +89,18 @@ func TestPlanRunsOnlyInitAndPlanAndTreatsExitTwoAsChanges(t *testing.T) {
 	if string(lock) != "lock-v1\n" {
 		t.Fatalf("unexpected persisted lock %q", lock)
 	}
+	if _, err := os.Stat(workspace.PlanManifestFile); err != nil {
+		t.Fatalf("expected successful plan manifest: %v", err)
+	}
 	if runtime.GOOS != "windows" {
-		info, err := os.Stat(workspace.PlanFile)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := info.Mode().Perm(); got != 0o600 {
-			t.Fatalf("plan permissions = %o, want 600", got)
+		for _, path := range []string{workspace.PlanFile, workspace.PlanManifestFile} {
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := info.Mode().Perm(); got != 0o600 {
+				t.Fatalf("%s permissions = %o, want 600", path, got)
+			}
 		}
 	}
 }
@@ -119,6 +125,9 @@ func TestPlanRehydratesPersistentLockReadonly(t *testing.T) {
 			}
 			return 0, nil
 		case "plan":
+			if err := os.WriteFile(workspace.PlanFile, []byte("no-change-plan"), 0o600); err != nil {
+				t.Fatal(err)
+			}
 			return 0, nil
 		default:
 			t.Fatalf("unexpected command %q", command.Args[0])
@@ -135,6 +144,27 @@ func TestPlanRehydratesPersistentLockReadonly(t *testing.T) {
 	}
 	if !slices.Contains(initCommand.Args, "-lockfile=readonly") {
 		t.Fatalf("existing lock did not make init readonly: %#v", initCommand.Args)
+	}
+}
+
+func TestPlanInvalidatesPreviousManifestBeforeFailedReplan(t *testing.T) {
+	configPath, workspace := setupTerraformProject(t)
+	if err := os.WriteFile(workspace.PlanManifestFile, []byte("old-manifest"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := runnerFunc(func(_ context.Context, command Command) (int, error) {
+		if command.Args[0] == "init" {
+			return 1, nil
+		}
+		t.Fatalf("unexpected command after failed init: %q", command.Args[0])
+		return 1, nil
+	})
+	_, err := Plan(context.Background(), validOptions(configPath, runner))
+	if err == nil {
+		t.Fatal("expected failed replan")
+	}
+	if _, statErr := os.Stat(workspace.PlanManifestFile); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("stale manifest survived failed replan: %v", statErr)
 	}
 }
 
@@ -160,7 +190,7 @@ func TestPlanRejectsSymlinkedPersistentLock(t *testing.T) {
 		t.Fatalf("expected symlink lock rejection, got %v", err)
 	}
 	if called {
-		t.Fatal("runner called with symlinked dependency lock")
+		t.Fatal("Terraform init/plan runner called with symlinked dependency lock")
 	}
 }
 
@@ -339,10 +369,26 @@ func validOptions(configPath string, runner Runner) PlanOptions {
 			TokenSecret: "secret",
 		},
 		BaseEnvironment: []string{"PATH=/bin"},
-		Runner:          runner,
+		Runner:          withTerraformVersion(runner),
 		Stdout:          &bytes.Buffer{},
 		Stderr:          &bytes.Buffer{},
 	}
+}
+
+func withTerraformVersion(runner Runner) Runner {
+	return runnerFunc(func(ctx context.Context, command Command) (int, error) {
+		if len(command.Args) > 0 && command.Args[0] == "version" {
+			if got := envValue(command.Env, providerTokenEnv); got != "" {
+				return 1, fmt.Errorf("provider token leaked into terraform version environment")
+			}
+			if command.Stdout == nil {
+				return 1, errors.New("terraform version stdout is nil")
+			}
+			_, err := fmt.Fprint(command.Stdout, `{"terraform_version":"1.16.0","platform":"test","provider_selections":{},"terraform_outdated":false}`)
+			return 0, err
+		}
+		return runner.Run(ctx, command)
+	})
 }
 
 func envValue(environment []string, key string) string {
