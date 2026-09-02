@@ -66,7 +66,36 @@ spec:
 
 Target names use the same lowercase letters, numbers, and hyphen rules as Bareplane names. Duplicate targets are rejected. Every node-group target must exist in `spec.provider.targets`.
 
-Targets are optional in the current schema because validation, doctor, discovery, and read-only planning can be useful before provisioning configuration is complete. Rendering or applying provider infrastructure may require targets later.
+Targets are optional in the base schema because validation, doctor, discovery, and read-only planning can be useful before provisioning configuration is complete.
+
+## Proxmox provisioning
+
+The optional `spec.provider.proxmox` block contains non-secret settings required to render virtual machines:
+
+```yaml
+spec:
+  provider:
+    type: proxmox
+    endpoint: https://proxmox.example.com:8006
+    targets:
+      - pve1
+      - pve2
+    proxmox:
+      bridge: vmbr0
+      systemDatastore: local-lvm
+      cloudImageFileID: local:import/debian-12-genericcloud-amd64.qcow2
+      ssh:
+        user: debian
+        publicKeyFile: ~/.ssh/id_ed25519.pub
+```
+
+`bridge` is the Proxmox network bridge attached to generated VMs. `systemDatastore` is the datastore that receives their system disks and cloud-init disks. `cloudImageFileID` references an image that already exists in Proxmox using either `<datastore>:import/<file>` for an uncompressed import image or `<datastore>:iso/<file>` for a supported ISO-content image. The configured image must be available to every target that may receive a machine.
+
+`ssh.user` is the cloud-init login user. `ssh.publicKeyFile` is a path on the operator machine to a public key; it is not the key contents and it is not a private key.
+
+Bareplane deliberately does not model Proxmox API token values, SSH private keys, passwords, or other credentials in this block. API credentials remain environment-only.
+
+The base `Validate()` path allows this block to be absent so read-only workflows remain usable. Infrastructure renderers call the stronger `ValidateProvisioning()` contract, which additionally requires at least one provider target and every Proxmox provisioning field.
 
 ## Validate
 

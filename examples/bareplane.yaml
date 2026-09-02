@@ -10,6 +10,13 @@ spec:
     targets:
       - pve1
       - pve2
+    proxmox:
+      bridge: vmbr0
+      systemDatastore: local-lvm
+      cloudImageFileID: local:import/debian-12-genericcloud-amd64.qcow2
+      ssh:
+        user: debian
+        publicKeyFile: ~/.ssh/id_ed25519.pub
   nodes:
     - name: control-plane
       role: control-plane
