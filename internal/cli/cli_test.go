@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -122,5 +123,51 @@ spec:
 	}
 	if !strings.Contains(stdout.String(), `cluster "test"`) {
 		t.Fatalf("unexpected output %q", stdout.String())
+	}
+}
+
+func TestRunDoctorAllowsWarnings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bareplane.yaml")
+	var initOut, initErr bytes.Buffer
+	if code := Run([]string{"init", path}, &initOut, &initErr); code != 0 {
+		t.Fatalf("init exit code = %d: %s", code, initErr.String())
+	}
+
+	lookPath := func(name string) (string, error) {
+		if name == "helm" {
+			return "", fmt.Errorf("not found")
+		}
+		return filepath.Join("/usr/bin", name), nil
+	}
+	var stdout, stderr bytes.Buffer
+	code := runDoctor([]string{path}, &stdout, &stderr, lookPath)
+	if code != 0 {
+		t.Fatalf("doctor exit code = %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "WARN  helm") {
+		t.Fatalf("expected helm warning, got %q", stdout.String())
+	}
+}
+
+func TestRunDoctorFailsForRequiredTool(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bareplane.yaml")
+	var initOut, initErr bytes.Buffer
+	if code := Run([]string{"init", path}, &initOut, &initErr); code != 0 {
+		t.Fatalf("init exit code = %d: %s", code, initErr.String())
+	}
+
+	lookPath := func(name string) (string, error) {
+		if name == "terraform" {
+			return "", fmt.Errorf("not found")
+		}
+		return filepath.Join("/usr/bin", name), nil
+	}
+	var stdout, stderr bytes.Buffer
+	code := runDoctor([]string{path}, &stdout, &stderr, lookPath)
+	if code != 1 {
+		t.Fatalf("expected doctor exit code 1, got %d", code)
+	}
+	if !strings.Contains(stdout.String(), "FAIL  terraform") {
+		t.Fatalf("expected terraform failure, got %q", stdout.String())
 	}
 }
