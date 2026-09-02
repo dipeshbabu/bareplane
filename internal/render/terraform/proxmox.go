@@ -18,18 +18,19 @@ const (
 	MainFilename           = "main.tf.json"
 )
 
-func RenderProxmox(cfg config.Config, desired topology.Topology, publicKey string) ([]byte, error) {
+func RenderProxmox(cfg config.Config, publicKey string) ([]byte, error) {
 	if err := cfg.ValidateProvisioning(); err != nil {
 		return nil, fmt.Errorf("validate provisioning configuration: %w", err)
 	}
-	if desired.Cluster != cfg.Metadata.Name {
-		return nil, fmt.Errorf("topology cluster %q does not match configuration cluster %q", desired.Cluster, cfg.Metadata.Name)
+	desired, err := topology.Build(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("build topology: %w", err)
 	}
-
-	publicKey, err := normalizePublicKey(publicKey)
+	publicKey, err = normalizePublicKey(publicKey)
 	if err != nil {
 		return nil, fmt.Errorf("validate SSH public key: %w", err)
 	}
+
 	settings := cfg.Spec.Provider.Proxmox
 	ownershipTags, err := ownership.Tags(cfg.Metadata.Name)
 	if err != nil {
@@ -38,10 +39,15 @@ func RenderProxmox(cfg config.Config, desired topology.Topology, publicKey strin
 
 	resources := make(map[string]any, len(desired.Machines))
 	seenAddresses := make(map[string]string, len(desired.Machines))
+	maxInt := int(^uint(0) >> 1)
 	for _, machine := range desired.Machines {
 		if machine.Target == "" {
 			return nil, fmt.Errorf("machine %q has no provider target", machine.Name)
 		}
+		if machine.MemoryGB > maxInt/1024 {
+			return nil, fmt.Errorf("machine %q memory is too large to render in MiB", machine.Name)
+		}
+
 		address := resourceName(machine.Name)
 		if existing, exists := seenAddresses[address]; exists {
 			return nil, fmt.Errorf("machines %q and %q map to the same Terraform resource name %q", existing, machine.Name, address)
@@ -49,7 +55,7 @@ func RenderProxmox(cfg config.Config, desired topology.Topology, publicKey strin
 		seenAddresses[address] = machine.Name
 
 		disk := map[string]any{
-			"datastore_id": settings.SystemDatastore,
+			"datastore_id": tfString(settings.SystemDatastore),
 			"discard":      "on",
 			"interface":    "scsi0",
 			"iothread":     true,
@@ -68,10 +74,10 @@ func RenderProxmox(cfg config.Config, desired topology.Topology, publicKey strin
 			"cpu": map[string]any{
 				"cores": machine.CPU,
 			},
-			"description":         tfString("Managed by Bareplane"),
-			"disk":                []any{disk},
+			"description": tfString("Managed by Bareplane"),
+			"disk":        []any{disk},
 			"initialization": map[string]any{
-				"datastore_id": settings.SystemDatastore,
+				"datastore_id": tfString(settings.SystemDatastore),
 				"ip_config": map[string]any{
 					"ipv4": map[string]any{
 						"address": "dhcp",
@@ -85,14 +91,14 @@ func RenderProxmox(cfg config.Config, desired topology.Topology, publicKey strin
 			"memory": map[string]any{
 				"dedicated": machine.MemoryGB * 1024,
 			},
-			"name":                 tfString(machine.Name),
+			"name": tfString(machine.Name),
 			"network_device": []any{
 				map[string]any{
 					"bridge": tfString(settings.Bridge),
 				},
 			},
-			"node_name":           tfString(machine.Target),
-			"on_boot":             true,
+			"node_name": tfString(machine.Target),
+			"on_boot":   true,
 			"operating_system": map[string]any{
 				"type": "l26",
 			},
@@ -159,8 +165,16 @@ func normalizePublicKey(value string) (string, error) {
 	if !strings.HasPrefix(algorithm, "ssh-") && !strings.HasPrefix(algorithm, "ecdsa-") && !strings.HasPrefix(algorithm, "sk-") {
 		return "", fmt.Errorf("unsupported public key algorithm %q", algorithm)
 	}
-	if _, err := base64.StdEncoding.DecodeString(fields[1]); err != nil {
+	if err := decodePublicKeyPayload(fields[1]); err != nil {
 		return "", fmt.Errorf("public key payload is not valid base64: %w", err)
 	}
 	return value, nil
+}
+
+func decodePublicKeyPayload(payload string) error {
+	if _, err := base64.StdEncoding.DecodeString(payload); err == nil {
+		return nil
+	}
+	_, err := base64.RawStdEncoding.DecodeString(payload)
+	return err
 }
