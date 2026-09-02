@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/dipeshbabu/bareplane/internal/config"
 	"github.com/dipeshbabu/bareplane/internal/project"
 	"github.com/dipeshbabu/bareplane/internal/provider/proxmox"
 )
@@ -83,7 +82,7 @@ func Plan(ctx context.Context, options PlanOptions) (PlanResult, error) {
 	if strings.TrimSpace(options.Credentials.TokenID) == "" || strings.TrimSpace(options.Credentials.TokenSecret) == "" {
 		return PlanResult{}, errors.New("Proxmox API token credentials are required")
 	}
-	if err := validateProvisioningConfig(options.ConfigPath); err != nil {
+	if _, err := loadProvisioningConfig(options.ConfigPath); err != nil {
 		return PlanResult{}, err
 	}
 
@@ -193,23 +192,6 @@ func finalizeSuccessfulPlan(configPath string, workspace project.TerraformWorksp
 	return nil
 }
 
-func validateProvisioningConfig(path string) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf("open configuration: %w", err)
-	}
-	defer file.Close()
-
-	cfg, err := config.Load(file)
-	if err != nil {
-		return fmt.Errorf("load configuration: %w", err)
-	}
-	if err := cfg.ValidateProvisioning(); err != nil {
-		return fmt.Errorf("configuration is not provisioning-ready: %w", err)
-	}
-	return nil
-}
-
 func runExpected(ctx context.Context, runner Runner, command Command, expected int) error {
 	exitCode, err := runner.Run(ctx, command)
 	if err != nil {
@@ -222,21 +204,33 @@ func runExpected(ctx context.Context, runner Runner, command Command, expected i
 }
 
 func terraformEnvironment(base []string, dataDir string, credentials proxmox.Credentials) []string {
+	filtered := controlledTerraformEnvironment(base, dataDir)
+	return append(filtered, providerTokenEnv+"="+strings.TrimSpace(credentials.TokenID)+"="+strings.TrimSpace(credentials.TokenSecret))
+}
+
+func controlledTerraformEnvironment(base []string, dataDir string) []string {
 	if base == nil {
 		base = os.Environ()
 	}
-	filtered := make([]string, 0, len(base)+2)
+	filtered := make([]string, 0, len(base)+1)
 	for _, entry := range base {
-		if environmentKey(entry) == providerTokenEnv || environmentKey(entry) == "TF_DATA_DIR" {
+		key := environmentKey(entry)
+		if blockedTerraformEnvironmentKey(key) {
 			continue
 		}
 		filtered = append(filtered, entry)
 	}
-	filtered = append(filtered,
-		"TF_DATA_DIR="+dataDir,
-		providerTokenEnv+"="+strings.TrimSpace(credentials.TokenID)+"="+strings.TrimSpace(credentials.TokenSecret),
-	)
-	return filtered
+	return append(filtered, "TF_DATA_DIR="+dataDir)
+}
+
+func blockedTerraformEnvironmentKey(key string) bool {
+	upper := strings.ToUpper(strings.TrimSpace(key))
+	return upper == "TF_DATA_DIR" ||
+		upper == "TF_WORKSPACE" ||
+		upper == "TF_CLI_ARGS" ||
+		strings.HasPrefix(upper, "TF_CLI_ARGS_") ||
+		strings.HasPrefix(upper, "TF_VAR_") ||
+		strings.HasPrefix(upper, "PROXMOX_VE_")
 }
 
 func environmentKey(entry string) string {
