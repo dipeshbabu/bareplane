@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/dipeshbabu/bareplane/internal/config"
 	"github.com/dipeshbabu/bareplane/internal/project"
 	"github.com/dipeshbabu/bareplane/internal/provider/proxmox"
 )
@@ -83,7 +82,7 @@ func Plan(ctx context.Context, options PlanOptions) (result PlanResult, err erro
 	if strings.TrimSpace(options.Credentials.TokenID) == "" || strings.TrimSpace(options.Credentials.TokenSecret) == "" {
 		return PlanResult{}, errors.New("Proxmox API token credentials are required")
 	}
-	if err := validateProvisioningConfig(options.ConfigPath); err != nil {
+	if _, err := loadProvisioningConfig(options.ConfigPath); err != nil {
 		return PlanResult{}, err
 	}
 
@@ -150,7 +149,7 @@ func Plan(ctx context.Context, options PlanOptions) (result PlanResult, err erro
 		Stdout: options.Stdout,
 		Stderr: options.Stderr,
 	}, 0); err != nil {
-		return PlanResult{}, fmt.Errorf("terraform init failed: %w", err)
+		return PlanResult{}, fmt.Errorf("terraform init failed: %w", redactTerraformError(err, options.Credentials))
 	}
 
 	if _, err := copyIfExists(generatedLock, workspace.LockFile, 0o600); err != nil {
@@ -165,7 +164,7 @@ func Plan(ctx context.Context, options PlanOptions) (result PlanResult, err erro
 		"-state=" + workspace.StateFile,
 		"-out=" + workspace.PlanFile,
 	}
-	exitCode, err := options.Runner.Run(ctx, Command{
+	exitCode, runErr := options.Runner.Run(ctx, Command{
 		Binary: options.TerraformBinary,
 		Args:   planArgs,
 		Dir:    workspace.GeneratedDir,
@@ -173,8 +172,8 @@ func Plan(ctx context.Context, options PlanOptions) (result PlanResult, err erro
 		Stdout: options.Stdout,
 		Stderr: options.Stderr,
 	})
-	if err != nil {
-		return PlanResult{}, fmt.Errorf("run terraform plan: %w", err)
+	if runErr != nil {
+		return PlanResult{}, fmt.Errorf("run terraform plan: %w", redactTerraformError(runErr, options.Credentials))
 	}
 
 	var changes bool
@@ -208,23 +207,6 @@ func finalizeSuccessfulPlan(configPath string, workspace project.TerraformWorksp
 	return nil
 }
 
-func validateProvisioningConfig(path string) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf("open configuration: %w", err)
-	}
-	defer file.Close()
-
-	cfg, err := config.Load(file)
-	if err != nil {
-		return fmt.Errorf("load configuration: %w", err)
-	}
-	if err := cfg.ValidateProvisioning(); err != nil {
-		return fmt.Errorf("configuration is not provisioning-ready: %w", err)
-	}
-	return nil
-}
-
 func runExpected(ctx context.Context, runner Runner, command Command, expected int) error {
 	exitCode, err := runner.Run(ctx, command)
 	if err != nil {
@@ -237,21 +219,40 @@ func runExpected(ctx context.Context, runner Runner, command Command, expected i
 }
 
 func terraformEnvironment(base []string, dataDir string, credentials proxmox.Credentials) []string {
+	filtered := controlledTerraformEnvironment(base, dataDir)
+	return append(filtered, providerTokenEnv+"="+strings.TrimSpace(credentials.TokenID)+"="+strings.TrimSpace(credentials.TokenSecret))
+}
+
+func controlledTerraformEnvironment(base []string, dataDir string) []string {
 	if base == nil {
 		base = os.Environ()
 	}
-	filtered := make([]string, 0, len(base)+2)
+	filtered := make([]string, 0, len(base)+1)
 	for _, entry := range base {
-		if environmentKey(entry) == providerTokenEnv || environmentKey(entry) == "TF_DATA_DIR" {
+		key := environmentKey(entry)
+		if blockedTerraformEnvironmentKey(key) {
 			continue
 		}
 		filtered = append(filtered, entry)
 	}
-	filtered = append(filtered,
-		"TF_DATA_DIR="+dataDir,
-		providerTokenEnv+"="+strings.TrimSpace(credentials.TokenID)+"="+strings.TrimSpace(credentials.TokenSecret),
-	)
-	return filtered
+	return append(filtered, "TF_DATA_DIR="+dataDir)
+}
+
+func blockedTerraformEnvironmentKey(key string) bool {
+	upper := strings.ToUpper(strings.TrimSpace(key))
+	return upper == "TF_DATA_DIR" ||
+		upper == "TF_WORKSPACE" ||
+		upper == "TF_CLI_ARGS" ||
+		upper == "TF_CLI_CONFIG_FILE" ||
+		upper == "TF_REATTACH_PROVIDERS" ||
+		upper == "TF_LOG" ||
+		upper == "TF_LOG_PATH" ||
+		upper == "TF_LOG_PROVIDER" ||
+		upper == proxmox.EnvTokenID ||
+		upper == proxmox.EnvTokenSecret ||
+		strings.HasPrefix(upper, "TF_CLI_ARGS_") ||
+		strings.HasPrefix(upper, "TF_VAR_") ||
+		strings.HasPrefix(upper, "PROXMOX_VE_")
 }
 
 func environmentKey(entry string) string {

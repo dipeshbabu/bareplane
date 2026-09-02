@@ -33,13 +33,15 @@ No Terraform state, provider data, saved plan, plan attestation, or canonical de
 
 Workspace creation is idempotent. Bareplane refuses a symlink or non-directory at its `.bareplane`, `state`, Terraform state, or Terraform data directory boundaries rather than following an unexpected workspace redirect.
 
-`bareplane terraform plan` uses this workspace directly. `TF_DATA_DIR` points to `data/`, the local state path is passed explicitly to Terraform, and the saved plan is written to `terraform.tfplan`.
+`bareplane terraform plan` and the guarded saved-plan apply path use this workspace directly. `TF_DATA_DIR` points to `data/`, local state and backup paths are passed explicitly to Terraform, and the saved plan is written to `terraform.tfplan`.
 
 The dependency lock file has a persistent canonical path in the state workspace. Before Terraform initialization, Bareplane copies that lock into the generated configuration directory when one exists and uses read-only lock selection. After a successful first initialization, Bareplane persists the generated lock back into the state workspace.
 
 ## Operation serialization
 
-Bareplane serializes operations that change Terraform project artifacts. `bareplane render` and `bareplane terraform plan` acquire the same project-scoped operation lock before changing generated configuration, saved plans, provider locks, or related state metadata.
+Bareplane serializes operations that change or consume Terraform project artifacts. `bareplane render`, `bareplane terraform plan`, and `bareplane terraform apply` acquire the same project-scoped operation lock before entering their critical sections.
+
+For apply, the lock is held across plan-attestation verification, dependency-lock restoration, Terraform initialization, the second attestation check, attestation invalidation, the saved-plan mutation attempt, state hardening, and successful plan cleanup. This prevents Bareplane render or planning from replacing the files an apply has already approved.
 
 Acquisition uses an atomic directory creation under `.bareplane/state/terraform`. Lock metadata contains only a format version, operation name, process ID, and random ownership token. The directory is private and the metadata file is owner-only on POSIX systems.
 
@@ -47,12 +49,14 @@ Bareplane never automatically deletes an existing lock. An existing lock may rep
 
 A lock instance verifies its ownership token before release, so one operation cannot deliberately release a lock created by another.
 
-## Lifecycle rule
+## Lifecycle rules
 
-The invariant for Terraform execution is:
+Two invariants govern Terraform execution:
 
 > rendering may replace generated configuration, but it must never delete, replace, or silently reinitialize persistent Terraform state.
 
-In addition, Bareplane operations that mutate local Terraform project artifacts must hold the project operation lock for their critical section. This prevents a render from replacing generated Terraform while a Terraform plan is constructing or attesting a saved plan.
+> Bareplane operations that change or consume attested Terraform artifacts must hold the project operation lock for their full critical section.
 
-This layer remains read-only with respect to external infrastructure: it supports Terraform initialization and planning, but not apply, destroy, import, or Terraform state mutation commands.
+This prevents render, planning, and saved-plan apply from racing one another. A failed or partial apply invalidates its plan attestation before mutation begins, so a new plan is required before another Bareplane apply attempt.
+
+Bareplane still does not expose destroy, import, arbitrary Terraform state mutation, or raw Terraform argument forwarding.

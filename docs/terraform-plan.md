@@ -4,7 +4,7 @@ Bareplane exposes two different read-only planning paths.
 
 `bareplane plan` uses Bareplane's provider-native Proxmox discovery and ownership model. It compares desired machines with observed guests without invoking Terraform.
 
-`bareplane terraform plan [path]` runs Terraform against the deterministic configuration produced by `bareplane render`. It still does not apply changes.
+`bareplane terraform plan [path]` runs Terraform against the deterministic configuration produced by `bareplane render`. It does not apply changes.
 
 ## Prerequisites
 
@@ -18,7 +18,7 @@ export BAREPLANE_PROXMOX_TOKEN_ID='user@pve!bareplane'
 export BAREPLANE_PROXMOX_TOKEN_SECRET='...'
 ```
 
-Bareplane combines those values only in the child Terraform process environment as `PROXMOX_VE_API_TOKEN`. The token is not placed in generated Terraform or command arguments.
+Bareplane combines those values only in the controlled child Terraform process environment as `PROXMOX_VE_API_TOKEN`. The token is not placed in generated Terraform or command arguments.
 
 ## Execution
 
@@ -33,8 +33,6 @@ terraform version -json
 terraform init -backend=false -input=false -no-color
 terraform plan -input=false -no-color -detailed-exitcode ...
 ```
-
-There is no Bareplane Terraform apply, destroy, import, or state mutation command in this layer.
 
 The plan uses the persistent workspace defined in [terraform-workspace.md](terraform-workspace.md):
 
@@ -76,7 +74,7 @@ Verification recomputes every digest and checks the Terraform version. Editing t
 
 Bareplane removes any previous plan manifest before a new plan starts. Therefore a failed replan cannot leave an older plan marked as valid.
 
-This attestation is a prerequisite for a future apply workflow: apply must verify the saved plan against the current project context rather than trusting a filename or timestamp.
+The attestation is the authorization boundary for [Terraform apply](terraform-apply.md). `bareplane terraform apply` refuses to mutate infrastructure unless the manifest still matches the exact current project context and the operator supplies the exact cluster name as approval.
 
 ## Plan results
 
@@ -94,6 +92,6 @@ Treat `.bareplane/state/terraform` as sensitive local state. Terraform state and
 
 The entire `.bareplane` tree is ignored by this repository's default `.gitignore`.
 
-## No apply yet
+## Review before apply
 
-A successful Terraform plan is still only a preview. Bareplane deliberately stops before infrastructure mutation. An eventual apply workflow must verify the plan attestation and introduce explicit approval, ownership, state, and failure-recovery safeguards rather than simply exposing `terraform apply`.
+A successful Terraform plan is still only a preview. Review the plan output before running `bareplane terraform apply --approve <cluster-name>`. Apply consumes only the saved attested plan; it never creates an implicit replacement plan.
