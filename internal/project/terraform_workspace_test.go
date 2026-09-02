@@ -31,10 +31,20 @@ func TestTerraformWorkspaceForIsDeterministicAndSeparated(t *testing.T) {
 	if first.StateDir != wantState {
 		t.Fatalf("unexpected state directory %q", first.StateDir)
 	}
+	if first.PlanManifestFile != filepath.Join(wantState, "terraform.tfplan.json") {
+		t.Fatalf("unexpected plan manifest path %q", first.PlanManifestFile)
+	}
 	if filepath.Dir(first.StateDir) == first.GeneratedDir || first.StateDir == first.GeneratedDir {
 		t.Fatal("persistent state overlaps generated configuration")
 	}
-	for _, path := range []string{first.DataDir, first.StateFile, first.StateBackupFile, first.LockFile, first.PlanFile} {
+	for _, path := range []string{
+		first.DataDir,
+		first.StateFile,
+		first.StateBackupFile,
+		first.LockFile,
+		first.PlanFile,
+		first.PlanManifestFile,
+	} {
 		if !isWithin(first.StateDir, path) {
 			t.Fatalf("persistent artifact %q escaped state directory", path)
 		}

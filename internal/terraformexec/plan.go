@@ -97,11 +97,26 @@ func Plan(ctx context.Context, options PlanOptions) (PlanResult, error) {
 	if err := requireRegularFileOrMissing(workspace.StateFile, true); err != nil {
 		return PlanResult{}, fmt.Errorf("validate Terraform state path: %w", err)
 	}
+	if err := RemovePlanManifest(workspace.PlanManifestFile); err != nil {
+		return PlanResult{}, fmt.Errorf("invalidate previous Terraform plan manifest: %w", err)
+	}
 	if err := removeRegularFileIfPresent(workspace.PlanFile); err != nil {
 		return PlanResult{}, fmt.Errorf("prepare Terraform plan path: %w", err)
 	}
 
-	generatedLock := filepath.Join(workspace.GeneratedDir, ".terraform.lock.hcl")
+	terraformVersion, err := readTerraformVersion(
+		ctx,
+		options.Runner,
+		options.TerraformBinary,
+		workspace.GeneratedDir,
+		options.BaseEnvironment,
+		workspace.DataDir,
+	)
+	if err != nil {
+		return PlanResult{}, fmt.Errorf("read Terraform version: %w", err)
+	}
+
+	generatedLock := filepath.Join(workspace.GeneratedDir, terraformLockFilename)
 	lockExists, err := copyIfExists(workspace.LockFile, generatedLock, 0o644)
 	if err != nil {
 		return PlanResult{}, fmt.Errorf("restore Terraform dependency lock: %w", err)
@@ -146,20 +161,36 @@ func Plan(ctx context.Context, options PlanOptions) (PlanResult, error) {
 	if err != nil {
 		return PlanResult{}, fmt.Errorf("run terraform plan: %w", err)
 	}
+
+	var changes bool
 	switch exitCode {
 	case 0:
-		if err := securePlanIfPresent(workspace.PlanFile); err != nil {
-			return PlanResult{}, err
-		}
-		return PlanResult{Changes: false}, nil
+		changes = false
 	case 2:
-		if err := securePlanIfPresent(workspace.PlanFile); err != nil {
-			return PlanResult{}, err
-		}
-		return PlanResult{Changes: true}, nil
+		changes = true
 	default:
 		return PlanResult{}, fmt.Errorf("terraform plan exited with code %d", exitCode)
 	}
+	if err := finalizeSuccessfulPlan(options.ConfigPath, workspace, terraformVersion); err != nil {
+		return PlanResult{}, err
+	}
+	return PlanResult{Changes: changes}, nil
+}
+
+func finalizeSuccessfulPlan(configPath string, workspace project.TerraformWorkspace, terraformVersion string) error {
+	if err := securePlanIfPresent(workspace.PlanFile); err != nil {
+		return err
+	}
+	if _, err := os.Stat(workspace.PlanFile); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return errors.New("Terraform reported a successful saved plan but did not create the plan artifact")
+		}
+		return fmt.Errorf("inspect Terraform saved plan: %w", err)
+	}
+	if _, err := CreatePlanManifest(configPath, workspace, terraformVersion); err != nil {
+		return fmt.Errorf("create Terraform plan manifest: %w", err)
+	}
+	return nil
 }
 
 func validateProvisioningConfig(path string) error {
