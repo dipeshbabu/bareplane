@@ -41,14 +41,10 @@ Regeneration uses a staged directory replacement. The previous managed directory
 
 This prevents a render failure from deliberately deleting the last valid generated output and prevents Bareplane from overwriting unrelated user files.
 
-## Review and apply
+## Execution state
 
-Rendering is intentionally separate from execution:
+Generated Terraform is replaceable, so Terraform state and execution metadata must not be stored inside `.bareplane/terraform`. Bareplane reserves `.bareplane/state/terraform` as the persistent execution workspace.
 
-```bash
-bareplane render
-terraform -chdir=.bareplane/terraform init
-terraform -chdir=.bareplane/terraform plan
-```
+See [terraform-workspace.md](terraform-workspace.md) for the state, provider data, dependency lock, and saved-plan lifecycle contract.
 
-Bareplane does not currently run `terraform apply`. Generated infrastructure should be reviewed before any mutation workflow is introduced.
+Bareplane does not currently execute Terraform or run `terraform apply`. The next execution layer will use the persistent workspace explicitly rather than relying on Terraform's default state location inside the generated directory.
