@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,7 +30,7 @@ func TestChecksReportPassWarningAndFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	report := Run(t.Context(), checks)
+	report := Run(context.Background(), checks)
 
 	if report.HasFailures() {
 		t.Fatalf("unexpected failure report: %#v", report.Results)
@@ -57,7 +58,7 @@ func TestChecksFailWhenRequiredExecutableIsMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	report := Run(t.Context(), checks)
+	report := Run(context.Background(), checks)
 	if !report.HasFailures() {
 		t.Fatal("expected missing required executable to fail")
 	}
@@ -86,7 +87,7 @@ func TestChecksSkipProviderWhenConfigurationIsInvalid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	report := Run(t.Context(), checks)
+	report := Run(context.Background(), checks)
 
 	if result := findResult(t, report, "configuration"); result.Status != StatusFail {
 		t.Fatalf("configuration status = %q", result.Status)
@@ -115,7 +116,7 @@ func TestChecksUseProviderValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	report := Run(t.Context(), checks)
+	report := Run(context.Background(), checks)
 
 	if result := findResult(t, report, "configuration"); result.Status != StatusPass {
 		t.Fatalf("configuration should pass, got %q", result.Status)
