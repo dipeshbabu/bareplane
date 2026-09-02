@@ -129,10 +129,6 @@ func applyLocked(ctx context.Context, options ApplyOptions, cfg config.Config) (
 		return ApplyResult{}, fmt.Errorf("terraform init failed: %w", redactTerraformError(err, options.Credentials))
 	}
 
-	// Re-check all attested inputs after initialization and immediately before
-	// invalidating the manifest and beginning the mutation attempt. The project
-	// operation lock prevents Bareplane render/plan from changing these files
-	// between this check and the apply command.
 	if _, err := VerifyPlanManifest(options.ConfigPath, workspace, terraformVersion); err != nil {
 		return ApplyResult{}, fmt.Errorf("verify Terraform saved plan after init: %w", err)
 	}
@@ -223,19 +219,27 @@ func secureTerraformStateArtifacts(workspace project.TerraformWorkspace) error {
 	return nil
 }
 
+type redactedError struct {
+	message string
+	cause   error
+}
+
+func (e *redactedError) Error() string { return e.message }
+func (e *redactedError) Unwrap() error { return e.cause }
+
 func redactTerraformError(err error, credentials proxmox.Credentials) error {
 	if err == nil {
 		return nil
 	}
 	message := err.Error()
 	for _, sensitive := range []string{
+		strings.TrimSpace(credentials.TokenID) + "=" + strings.TrimSpace(credentials.TokenSecret),
 		strings.TrimSpace(credentials.TokenSecret),
 		strings.TrimSpace(credentials.TokenID),
-		strings.TrimSpace(credentials.TokenID) + "=" + strings.TrimSpace(credentials.TokenSecret),
 	} {
 		if sensitive != "" {
 			message = strings.ReplaceAll(message, sensitive, "[redacted]")
 		}
 	}
-	return errors.New(message)
+	return &redactedError{message: message, cause: err}
 }
