@@ -21,8 +21,8 @@ type RuntimeProvider struct {
 }
 
 func NewRuntime(cfg config.Provider, client *Client) (*RuntimeProvider, error) {
-	if client == nil {
-		return nil, fmt.Errorf("proxmox client is nil")
+	if client == nil || client.baseURL == nil {
+		return nil, fmt.Errorf("proxmox client is nil or uninitialized")
 	}
 
 	resolved, err := New(cfg)
@@ -32,6 +32,9 @@ func NewRuntime(cfg config.Provider, client *Client) (*RuntimeProvider, error) {
 	base, ok := resolved.(*Provider)
 	if !ok {
 		return nil, fmt.Errorf("initialize proxmox runtime: unexpected provider type %T", resolved)
+	}
+	if client.baseURL.String() != base.Endpoint() {
+		return nil, fmt.Errorf("proxmox client endpoint %q does not match provider endpoint %q", client.baseURL.String(), base.Endpoint())
 	}
 	return &RuntimeProvider{provider: base, client: client}, nil
 }
