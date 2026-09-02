@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/dipeshbabu/bareplane/internal/bootstrapdoctor"
 	"github.com/dipeshbabu/bareplane/internal/config"
 	"github.com/dipeshbabu/bareplane/internal/project"
 	ansiblerender "github.com/dipeshbabu/bareplane/internal/render/ansible"
@@ -15,9 +17,11 @@ import (
 
 const bootstrapUsage = `Usage:
   bareplane bootstrap render [path]
+  bareplane bootstrap doctor [path]
 
 Commands:
   render     Render deterministic Ansible inventory without connecting to hosts
+  doctor     Check local bootstrap inventory, SSH key, and tooling readiness
 `
 
 func runBootstrap(args []string, stdout, stderr io.Writer) int {
@@ -31,10 +35,42 @@ func runBootstrap(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "render":
 		return runBootstrapRender(args[1:], stdout, stderr)
+	case "doctor":
+		return runBootstrapDoctor(args[1:], stdout, stderr, exec.LookPath, os.UserHomeDir)
 	default:
 		fmt.Fprintf(stderr, "unknown bootstrap command %q\n\n%s", args[0], bootstrapUsage)
 		return 2
 	}
+}
+
+func runBootstrapDoctor(
+	args []string,
+	stdout io.Writer,
+	stderr io.Writer,
+	lookPath bootstrapdoctor.LookPathFunc,
+	homeDir bootstrapdoctor.UserHomeDirFunc,
+) int {
+	if len(args) > 1 {
+		fmt.Fprintln(stderr, "usage: bareplane bootstrap doctor [path]")
+		return 2
+	}
+	configPath := "bareplane.yaml"
+	if len(args) == 1 {
+		configPath = args[0]
+	}
+
+	report := bootstrapdoctor.Inspect(bootstrapdoctor.Options{
+		ConfigPath:  configPath,
+		LookPath:    lookPath,
+		UserHomeDir: homeDir,
+	})
+	for _, result := range report.Results {
+		fmt.Fprintf(stdout, "%-4s  %-18s %s\n", strings.ToUpper(string(result.Status)), result.Name, result.Message)
+	}
+	if report.HasFailures() {
+		return 1
+	}
+	return 0
 }
 
 func runBootstrapRender(args []string, stdout, stderr io.Writer) int {
