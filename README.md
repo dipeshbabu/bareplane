@@ -34,7 +34,7 @@ Planned commands include `init`, `validate`, `doctor`, `bootstrap`, `status`, an
 
 ## Development
 
-Requires Go 1.25 or newer.
+Requires Go 1.23 or newer.
 
 ```bash
 make check
