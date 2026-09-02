@@ -2,6 +2,9 @@
 /bin/
 /dist/
 
+# Bareplane generated output
+/.bareplane/
+
 # Go
 *.test
 *.out
