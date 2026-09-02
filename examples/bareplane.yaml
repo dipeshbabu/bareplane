@@ -33,6 +33,17 @@ spec:
       gpu: true
       targets:
         - pve2
+  bootstrap:
+    ssh:
+      user: debian
+      privateKeyFile: ~/.ssh/id_ed25519
+      port: 22
+      hosts:
+        homelab-control-plane-1: 192.168.1.101
+        homelab-control-plane-2: 192.168.1.102
+        homelab-control-plane-3: 192.168.1.103
+        homelab-gpu-workers-1: 192.168.1.111
+        homelab-gpu-workers-2: 192.168.1.112
   features:
     observability: true
     gpu: true
