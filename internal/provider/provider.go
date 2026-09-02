@@ -45,9 +45,19 @@ type Plan struct {
 	Changes []Change
 }
 
+func (p Plan) HasConflicts() bool {
+	for _, change := range p.Changes {
+		if change.Action == ActionConflict {
+			return true
+		}
+	}
+	return false
+}
+
 type Change struct {
 	Action Action
 	Kind   string
+	ID     string
 	Name   string
 	Reason string
 }
@@ -55,8 +65,9 @@ type Change struct {
 type Action string
 
 const (
-	ActionCreate Action = "create"
-	ActionUpdate Action = "update"
-	ActionDelete Action = "delete"
-	ActionNoop   Action = "noop"
+	ActionCreate   Action = "create"
+	ActionUpdate   Action = "update"
+	ActionDelete   Action = "delete"
+	ActionNoop     Action = "noop"
+	ActionConflict Action = "conflict"
 )
