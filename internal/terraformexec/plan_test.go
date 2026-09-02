@@ -22,19 +22,19 @@ func (f runnerFunc) Run(ctx context.Context, command Command) (int, error) {
 	return f(ctx, command)
 }
 
-func TestPlanRunsOnlyInitAndPlanAndTreatsExitTwoAsChanges(t *testing.T) {
+func TestPlanExitTwoCreatesVerifiedManifest(t *testing.T) {
 	configPath, workspace := setupTerraformProject(t)
 	var commands []Command
 	runner := runnerFunc(func(_ context.Context, command Command) (int, error) {
 		commands = append(commands, command)
 		switch command.Args[0] {
 		case "init":
-			if err := os.WriteFile(filepath.Join(command.Dir, ".terraform.lock.hcl"), []byte("lock-v1\n"), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(command.Dir, terraformLockFilename), []byte("lock-v1\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			return 0, nil
 		case "plan":
-			if err := os.WriteFile(workspace.PlanFile, []byte("opaque plan"), 0o644); err != nil {
+			if err := os.WriteFile(workspace.PlanFile, []byte("opaque-plan"), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			return 2, nil
@@ -44,35 +44,33 @@ func TestPlanRunsOnlyInitAndPlanAndTreatsExitTwoAsChanges(t *testing.T) {
 		}
 	})
 
-	result, err := Plan(context.Background(), PlanOptions{
-		ConfigPath:      configPath,
-		TerraformBinary: "terraform-test",
-		Credentials: proxmox.Credentials{
-			TokenID:     "user@pve!bareplane",
-			TokenSecret: "top-secret",
-		},
-		BaseEnvironment: []string{"PATH=/bin", "PROXMOX_VE_API_TOKEN=stale", "TF_DATA_DIR=stale"},
-		Runner:          withTerraformVersion(runner),
-	})
+	options := validOptions(configPath, runner)
+	options.TerraformBinary = "terraform-test"
+	options.Credentials = proxmox.Credentials{TokenID: "user@pve!bareplane", TokenSecret: "top-secret"}
+	options.BaseEnvironment = []string{"PATH=/bin", providerTokenEnv + "=stale", "TF_DATA_DIR=stale"}
+
+	result, err := Plan(context.Background(), options)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !result.Changes {
 		t.Fatal("expected detailed exit code 2 to report changes")
 	}
-	if len(commands) != 2 {
-		t.Fatalf("expected init and plan, got %d commands", len(commands))
-	}
-	if commands[0].Binary != "terraform-test" || commands[0].Args[0] != "init" || commands[1].Args[0] != "plan" {
-		t.Fatalf("unexpected command sequence: %#v", commands)
+	if len(commands) != 2 || commands[0].Args[0] != "init" || commands[1].Args[0] != "plan" {
+		t.Fatalf("expected only init and plan, got %#v", commands)
 	}
 	for _, command := range commands {
+		if command.Binary != "terraform-test" {
+			t.Fatalf("unexpected binary %q", command.Binary)
+		}
 		joined := strings.Join(command.Args, " ")
 		if strings.Contains(joined, "top-secret") || strings.Contains(joined, "user@pve!bareplane") {
 			t.Fatalf("credentials leaked into arguments: %q", joined)
 		}
-		if slices.Contains(command.Args, "apply") || slices.Contains(command.Args, "destroy") || slices.Contains(command.Args, "import") {
-			t.Fatalf("mutation command present: %#v", command.Args)
+		for _, forbidden := range []string{"apply", "destroy", "import"} {
+			if slices.Contains(command.Args, forbidden) {
+				t.Fatalf("mutation command present: %#v", command.Args)
+			}
 		}
 		if got := envValue(command.Env, providerTokenEnv); got != "user@pve!bareplane=top-secret" {
 			t.Fatalf("provider token env = %q", got)
@@ -82,18 +80,15 @@ func TestPlanRunsOnlyInitAndPlanAndTreatsExitTwoAsChanges(t *testing.T) {
 		}
 	}
 
-	lock, err := os.ReadFile(workspace.LockFile)
+	manifest, err := VerifyPlanManifest(configPath, workspace, "1.16.0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(lock) != "lock-v1\n" {
-		t.Fatalf("unexpected persisted lock %q", lock)
-	}
-	if _, err := os.Stat(workspace.PlanManifestFile); err != nil {
-		t.Fatalf("expected successful plan manifest: %v", err)
+	if manifest.ClusterName != "test" || manifest.TerraformVersion != "1.16.0" {
+		t.Fatalf("unexpected manifest: %#v", manifest)
 	}
 	if runtime.GOOS != "windows" {
-		for _, path := range []string{workspace.PlanFile, workspace.PlanManifestFile} {
+		for _, path := range []string{workspace.PlanFile, workspace.PlanManifestFile, workspace.LockFile} {
 			info, err := os.Stat(path)
 			if err != nil {
 				t.Fatal(err)
@@ -116,7 +111,7 @@ func TestPlanRehydratesPersistentLockReadonly(t *testing.T) {
 		switch command.Args[0] {
 		case "init":
 			initCommand = command
-			got, err := os.ReadFile(filepath.Join(command.Dir, ".terraform.lock.hcl"))
+			got, err := os.ReadFile(filepath.Join(command.Dir, terraformLockFilename))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -159,12 +154,12 @@ func TestPlanInvalidatesPreviousManifestBeforeFailedReplan(t *testing.T) {
 		t.Fatalf("unexpected command after failed init: %q", command.Args[0])
 		return 1, nil
 	})
-	_, err := Plan(context.Background(), validOptions(configPath, runner))
-	if err == nil {
+
+	if _, err := Plan(context.Background(), validOptions(configPath, runner)); err == nil {
 		t.Fatal("expected failed replan")
 	}
-	if _, statErr := os.Stat(workspace.PlanManifestFile); !errors.Is(statErr, os.ErrNotExist) {
-		t.Fatalf("stale manifest survived failed replan: %v", statErr)
+	if _, err := os.Stat(workspace.PlanManifestFile); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale manifest survived failed replan: %v", err)
 	}
 }
 
@@ -219,40 +214,65 @@ func TestPlanRejectsMissingManagedRender(t *testing.T) {
 	}
 }
 
-func TestPlanPropagatesInitExitWithoutSecrets(t *testing.T) {
-	configPath, _ := setupTerraformProject(t)
-	secret := "do-not-print-me"
-	options := validOptions(configPath, runnerFunc(func(_ context.Context, command Command) (int, error) {
-		if command.Args[0] != "init" {
-			t.Fatal("plan should not run after failed init")
-		}
-		return 1, nil
-	}))
-	options.Credentials.TokenSecret = secret
-
-	_, err := Plan(context.Background(), options)
-	if err == nil || !strings.Contains(err.Error(), "terraform init failed") {
-		t.Fatalf("expected init error, got %v", err)
+func TestPlanFailuresDoNotCreateManifest(t *testing.T) {
+	tests := []struct {
+		name   string
+		runner Runner
+		want   string
+	}{
+		{
+			name: "init exit",
+			runner: runnerFunc(func(_ context.Context, command Command) (int, error) {
+				if command.Args[0] != "init" {
+					t.Fatalf("unexpected command %q", command.Args[0])
+				}
+				return 1, nil
+			}),
+			want: "terraform init failed",
+		},
+		{
+			name: "plan exit",
+			runner: runnerFunc(func(_ context.Context, command Command) (int, error) {
+				if command.Args[0] == "init" {
+					if err := os.WriteFile(filepath.Join(command.Dir, terraformLockFilename), []byte("lock\n"), 0o644); err != nil {
+						t.Fatal(err)
+					}
+					return 0, nil
+				}
+				return 1, nil
+			}),
+			want: "terraform plan exited with code 1",
+		},
 	}
-	if strings.Contains(err.Error(), secret) {
-		t.Fatalf("secret leaked into error: %v", err)
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			configPath, workspace := setupTerraformProject(t)
+			_, err := Plan(context.Background(), validOptions(configPath, test.runner))
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("expected %q error, got %v", test.want, err)
+			}
+			if _, statErr := os.Stat(workspace.PlanManifestFile); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("failed plan left a manifest: %v", statErr)
+			}
+		})
 	}
 }
 
-func TestPlanRejectsTerraformPlanFailure(t *testing.T) {
+func TestPlanRequiresSavedPlanArtifact(t *testing.T) {
 	configPath, _ := setupTerraformProject(t)
 	runner := runnerFunc(func(_ context.Context, command Command) (int, error) {
 		if command.Args[0] == "init" {
-			if err := os.WriteFile(filepath.Join(command.Dir, ".terraform.lock.hcl"), []byte("lock\n"), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(command.Dir, terraformLockFilename), []byte("lock\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			return 0, nil
 		}
-		return 1, nil
+		return 0, nil
 	})
 	_, err := Plan(context.Background(), validOptions(configPath, runner))
-	if err == nil || !strings.Contains(err.Error(), "terraform plan exited with code 1") {
-		t.Fatalf("expected plan failure, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "did not create the plan artifact") {
+		t.Fatalf("expected missing plan artifact error, got %v", err)
 	}
 }
 
@@ -287,7 +307,7 @@ func TestPlanRejectsMissingCredentialsBeforeExecution(t *testing.T) {
 
 func TestTerraformEnvironmentReplacesSensitiveOverrides(t *testing.T) {
 	environment := terraformEnvironment(
-		[]string{"PATH=/bin", "PROXMOX_VE_API_TOKEN=old", "TF_DATA_DIR=old"},
+		[]string{"PATH=/bin", providerTokenEnv + "=old", "TF_DATA_DIR=old"},
 		"/private/data",
 		proxmox.Credentials{TokenID: "id", TokenSecret: "secret"},
 	)
@@ -384,7 +404,7 @@ func withTerraformVersion(runner Runner) Runner {
 			if command.Stdout == nil {
 				return 1, errors.New("terraform version stdout is nil")
 			}
-			_, err := fmt.Fprint(command.Stdout, `{"terraform_version":"1.16.0","platform":"test","provider_selections":{},"terraform_outdated":false}`)
+			_, err := fmt.Fprint(command.Stdout, "{\"terraform_version\":\"1.16.0\",\"platform\":\"test\",\"provider_selections\":{},\"terraform_outdated\":false}")
 			return 0, err
 		}
 		return runner.Run(ctx, command)
