@@ -243,6 +243,8 @@ func blockedTerraformEnvironmentKey(key string) bool {
 	return upper == "TF_DATA_DIR" ||
 		upper == "TF_WORKSPACE" ||
 		upper == "TF_CLI_ARGS" ||
+		upper == "TF_CLI_CONFIG_FILE" ||
+		upper == "TF_REATTACH_PROVIDERS" ||
 		upper == "TF_LOG" ||
 		upper == "TF_LOG_PATH" ||
 		upper == "TF_LOG_PROVIDER" ||
