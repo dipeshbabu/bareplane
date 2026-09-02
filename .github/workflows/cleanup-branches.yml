@@ -23,11 +23,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Delete head ref
+      - name: Delete unchanged head ref
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
-        run: gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${HEAD_REF}"
+          MERGED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          current_sha=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${HEAD_REF}" --jq '.object.sha' 2>/dev/null || true)
+          if [ -n "${current_sha}" ] && [ "${current_sha}" = "${MERGED_SHA}" ]; then
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${HEAD_REF}"
+          fi
 
   prune-merged-branches:
     name: Prune stale merged branches
