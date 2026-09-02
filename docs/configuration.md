@@ -34,6 +34,40 @@ Top-level fields are strict. Unknown fields fail validation instead of being ign
 
 Proxmox currently requires an endpoint. Node groups require positive counts, CPU and memory values, and at least 10 GB of disk. Node group names must be unique.
 
+## Placement targets
+
+`spec.provider.targets` optionally lists infrastructure hosts that Bareplane may use for generated machines. A node group can set its own `targets` to a subset of that provider list.
+
+```yaml
+spec:
+  provider:
+    type: proxmox
+    endpoint: https://proxmox.example.com:8006
+    targets:
+      - pve1
+      - pve2
+  nodes:
+    - name: control-plane
+      role: control-plane
+      count: 3
+      cpu: 4
+      memoryGB: 8
+      diskGB: 64
+    - name: gpu-workers
+      role: worker
+      count: 2
+      cpu: 16
+      memoryGB: 64
+      diskGB: 256
+      gpu: true
+      targets:
+        - pve2
+```
+
+Target names use the same lowercase letters, numbers, and hyphen rules as Bareplane names. Duplicate targets are rejected. Every node-group target must exist in `spec.provider.targets`.
+
+Targets are optional in the current schema because validation, doctor, discovery, and read-only planning can be useful before provisioning configuration is complete. Rendering or applying provider infrastructure may require targets later.
+
 ## Validate
 
 ```bash

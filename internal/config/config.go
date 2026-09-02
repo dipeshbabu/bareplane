@@ -38,18 +38,20 @@ type Spec struct {
 }
 
 type Provider struct {
-	Type     string `yaml:"type"`
-	Endpoint string `yaml:"endpoint,omitempty"`
+	Type     string   `yaml:"type"`
+	Endpoint string   `yaml:"endpoint,omitempty"`
+	Targets  []string `yaml:"targets,omitempty"`
 }
 
 type NodeGroup struct {
-	Name     string `yaml:"name"`
-	Role     string `yaml:"role"`
-	Count    int    `yaml:"count"`
-	CPU      int    `yaml:"cpu"`
-	MemoryGB int    `yaml:"memoryGB"`
-	DiskGB   int    `yaml:"diskGB"`
-	GPU      bool   `yaml:"gpu,omitempty"`
+	Name     string   `yaml:"name"`
+	Role     string   `yaml:"role"`
+	Count    int      `yaml:"count"`
+	CPU      int      `yaml:"cpu"`
+	MemoryGB int      `yaml:"memoryGB"`
+	DiskGB   int      `yaml:"diskGB"`
+	GPU      bool     `yaml:"gpu,omitempty"`
+	Targets  []string `yaml:"targets,omitempty"`
 }
 
 type Features struct {
@@ -121,6 +123,18 @@ func (c Config) Validate() error {
 		problems = append(problems, "spec.provider.type must be proxmox")
 	}
 
+	providerTargets := make(map[string]struct{}, len(c.Spec.Provider.Targets))
+	for i, target := range c.Spec.Provider.Targets {
+		path := fmt.Sprintf("spec.provider.targets[%d]", i)
+		if !validName(target) {
+			problems = append(problems, path+" must use lowercase letters, numbers, and hyphens")
+		}
+		if _, exists := providerTargets[target]; exists && target != "" {
+			problems = append(problems, path+" is duplicated")
+		}
+		providerTargets[target] = struct{}{}
+	}
+
 	if len(c.Spec.Nodes) == 0 {
 		problems = append(problems, "spec.nodes must contain at least one node group")
 	}
@@ -148,6 +162,21 @@ func (c Config) Validate() error {
 		}
 		if node.DiskGB < 10 {
 			problems = append(problems, path+".diskGB must be at least 10")
+		}
+
+		seenTargets := make(map[string]struct{}, len(node.Targets))
+		for j, target := range node.Targets {
+			targetPath := fmt.Sprintf("%s.targets[%d]", path, j)
+			if !validName(target) {
+				problems = append(problems, targetPath+" must use lowercase letters, numbers, and hyphens")
+			}
+			if _, exists := seenTargets[target]; exists && target != "" {
+				problems = append(problems, targetPath+" is duplicated")
+			}
+			seenTargets[target] = struct{}{}
+			if _, exists := providerTargets[target]; !exists && target != "" {
+				problems = append(problems, targetPath+" must reference spec.provider.targets")
+			}
 		}
 	}
 
