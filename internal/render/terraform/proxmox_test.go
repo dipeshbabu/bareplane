@@ -54,20 +54,20 @@ func TestRenderProxmoxRendersPlacementOwnershipAndCapacity(t *testing.T) {
 	if vm["name"] != "lab-control-1" || vm["node_name"] != "pve1" {
 		t.Fatalf("unexpected VM identity: %#v", vm)
 	}
-	cpu := vm["cpu"].(map[string]any)
+	cpu := firstBlock(t, vm, "cpu")
 	if cpu["cores"] != float64(4) {
 		t.Fatalf("unexpected CPU block: %#v", cpu)
 	}
-	memory := vm["memory"].(map[string]any)
+	memory := firstBlock(t, vm, "memory")
 	if memory["dedicated"] != float64(8192) {
 		t.Fatalf("unexpected memory block: %#v", memory)
 	}
-	disk := vm["disk"].([]any)[0].(map[string]any)
+	disk := firstBlock(t, vm, "disk")
 	if disk["datastore_id"] != "local-lvm" || disk["size"] != float64(64) {
 		t.Fatalf("unexpected disk block: %#v", disk)
 	}
-	if disk["import_from"] != "local:import/debian.qcow2" {
-		t.Fatalf("expected import_from image source, got %#v", disk)
+	if disk["interface"] != "virtio0" || disk["import_from"] != "local:import/debian.qcow2" {
+		t.Fatalf("unexpected disk source or interface: %#v", disk)
 	}
 	if _, exists := disk["file_id"]; exists {
 		t.Fatal("import image unexpectedly rendered file_id")
@@ -77,14 +77,19 @@ func TestRenderProxmoxRendersPlacementOwnershipAndCapacity(t *testing.T) {
 	if len(tags) != 2 || tags[0] != "bareplane" || tags[1] != "bareplane-cluster-lab" {
 		t.Fatalf("unexpected ownership tags: %#v", tags)
 	}
-	agent := vm["agent"].(map[string]any)
+	agent := firstBlock(t, vm, "agent")
 	if agent["enabled"] != false {
 		t.Fatalf("guest agent must remain disabled initially: %#v", agent)
 	}
-	initialization := vm["initialization"].(map[string]any)
-	ipv4 := initialization["ip_config"].(map[string]any)["ipv4"].(map[string]any)
+	initialization := firstBlock(t, vm, "initialization")
+	ipConfig := firstBlock(t, initialization, "ip_config")
+	ipv4 := firstBlock(t, ipConfig, "ipv4")
 	if ipv4["address"] != "dhcp" {
 		t.Fatalf("unexpected IP config: %#v", ipv4)
+	}
+	user := firstBlock(t, initialization, "user_account")
+	if user["username"] != "debian" {
+		t.Fatalf("unexpected cloud-init user: %#v", user)
 	}
 }
 
@@ -97,7 +102,7 @@ func TestRenderProxmoxUsesFileIDForISOContent(t *testing.T) {
 	}
 	root := decodeDocument(t, encoded)
 	vm := root["resource"].(map[string]any)[VMResourceType].(map[string]any)["machine_lab_control_1"].(map[string]any)
-	disk := vm["disk"].([]any)[0].(map[string]any)
+	disk := firstBlock(t, vm, "disk")
 	if disk["file_id"] != "local:iso/debian.qcow2.xz" {
 		t.Fatalf("expected file_id image source, got %#v", disk)
 	}
@@ -159,6 +164,19 @@ func TestRenderProxmoxRequiresProvisioningReadyConfig(t *testing.T) {
 	if _, err := RenderProxmox(config.Default(), testPublicKey); err == nil {
 		t.Fatal("expected provisioning readiness error")
 	}
+}
+
+func firstBlock(t *testing.T, parent map[string]any, name string) map[string]any {
+	t.Helper()
+	blocks, ok := parent[name].([]any)
+	if !ok || len(blocks) != 1 {
+		t.Fatalf("expected exactly one %s block, got %#v", name, parent[name])
+	}
+	block, ok := blocks[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected %s block object, got %#v", name, blocks[0])
+	}
+	return block
 }
 
 func decodeDocument(t *testing.T, data []byte) map[string]any {
