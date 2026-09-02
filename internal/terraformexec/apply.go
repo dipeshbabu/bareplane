@@ -42,9 +42,6 @@ func Apply(ctx context.Context, options ApplyOptions) (ApplyResult, error) {
 	if options.Stderr == nil {
 		options.Stderr = io.Discard
 	}
-	if strings.TrimSpace(options.Credentials.TokenID) == "" || strings.TrimSpace(options.Credentials.TokenSecret) == "" {
-		return ApplyResult{}, errors.New("Proxmox API token credentials are required")
-	}
 
 	cfg, err := loadProvisioningConfig(options.ConfigPath)
 	if err != nil {
@@ -52,6 +49,9 @@ func Apply(ctx context.Context, options ApplyOptions) (ApplyResult, error) {
 	}
 	if options.Approval != cfg.Metadata.Name {
 		return ApplyResult{}, fmt.Errorf("approval must exactly match cluster name %q", cfg.Metadata.Name)
+	}
+	if strings.TrimSpace(options.Credentials.TokenID) == "" || strings.TrimSpace(options.Credentials.TokenSecret) == "" {
+		return ApplyResult{}, errors.New("Proxmox API token credentials are required")
 	}
 
 	workspace, err := project.EnsureTerraformWorkspace(options.ConfigPath)
@@ -63,6 +63,9 @@ func Apply(ctx context.Context, options ApplyOptions) (ApplyResult, error) {
 	}
 	if err := requireRegularFileOrMissing(workspace.StateFile, true); err != nil {
 		return ApplyResult{}, fmt.Errorf("validate Terraform state path: %w", err)
+	}
+	if err := requireRegularFileOrMissing(workspace.StateBackupFile, true); err != nil {
+		return ApplyResult{}, fmt.Errorf("validate Terraform state backup path: %w", err)
 	}
 	if err := requireExistingRegularFile(workspace.LockFile, true); err != nil {
 		return ApplyResult{}, fmt.Errorf("validate Terraform dependency lock: %w", err)
@@ -107,7 +110,7 @@ func Apply(ctx context.Context, options ApplyOptions) (ApplyResult, error) {
 		Stdout: options.Stdout,
 		Stderr: options.Stderr,
 	}, 0); err != nil {
-		return ApplyResult{}, fmt.Errorf("terraform init failed: %w", err)
+		return ApplyResult{}, fmt.Errorf("terraform init failed: %w", redactTerraformError(err, options.Credentials))
 	}
 
 	// Re-check all attested inputs after initialization and immediately before
@@ -129,7 +132,7 @@ func Apply(ctx context.Context, options ApplyOptions) (ApplyResult, error) {
 		"-backup=" + workspace.StateBackupFile,
 		workspace.PlanFile,
 	}
-	exitCode, err := options.Runner.Run(ctx, Command{
+	exitCode, runErr := options.Runner.Run(ctx, Command{
 		Binary: options.TerraformBinary,
 		Args:   applyArgs,
 		Dir:    workspace.GeneratedDir,
@@ -137,8 +140,15 @@ func Apply(ctx context.Context, options ApplyOptions) (ApplyResult, error) {
 		Stdout: options.Stdout,
 		Stderr: options.Stderr,
 	})
-	if err != nil {
-		return ApplyResult{}, fmt.Errorf("run terraform apply: %w", err)
+	stateErr := secureTerraformStateArtifacts(workspace)
+	if runErr != nil {
+		if stateErr != nil {
+			return ApplyResult{}, fmt.Errorf("run terraform apply: %v; secure Terraform state artifacts: %w", redactTerraformError(runErr, options.Credentials), stateErr)
+		}
+		return ApplyResult{}, fmt.Errorf("run terraform apply: %w", redactTerraformError(runErr, options.Credentials))
+	}
+	if stateErr != nil {
+		return ApplyResult{}, fmt.Errorf("secure Terraform state artifacts after apply: %w", stateErr)
 	}
 	if exitCode != 0 {
 		return ApplyResult{}, fmt.Errorf("terraform apply exited with code %d; the plan was invalidated and a new plan is required before retry", exitCode)
@@ -184,4 +194,30 @@ func requireExistingRegularFile(path string, secure bool) error {
 		}
 	}
 	return nil
+}
+
+func secureTerraformStateArtifacts(workspace project.TerraformWorkspace) error {
+	for _, path := range []string{workspace.StateFile, workspace.StateBackupFile} {
+		if err := requireRegularFileOrMissing(path, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func redactTerraformError(err error, credentials proxmox.Credentials) error {
+	if err == nil {
+		return nil
+	}
+	message := err.Error()
+	for _, sensitive := range []string{
+		strings.TrimSpace(credentials.TokenSecret),
+		strings.TrimSpace(credentials.TokenID),
+		strings.TrimSpace(credentials.TokenID) + "=" + strings.TrimSpace(credentials.TokenSecret),
+	} {
+		if sensitive != "" {
+			message = strings.ReplaceAll(message, sensitive, "[redacted]")
+		}
+	}
+	return errors.New(message)
 }
