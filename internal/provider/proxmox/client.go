@@ -127,7 +127,7 @@ func get[T any](ctx context.Context, c *Client, path string) (T, error) {
 			Path:       path,
 			StatusCode: resp.StatusCode,
 			Status:     resp.Status,
-			Message:    apiErrorMessage(body),
+			Message:    redactSecret(apiErrorMessage(body), c.credentials.TokenSecret),
 		}
 	}
 
@@ -174,4 +174,11 @@ func apiErrorMessage(body []byte) string {
 		parts = append(parts, key+": "+payload.Errors[key])
 	}
 	return strings.Join(parts, "; ")
+}
+
+func redactSecret(message, secret string) string {
+	if message == "" || secret == "" {
+		return message
+	}
+	return strings.ReplaceAll(message, secret, "[REDACTED]")
 }
