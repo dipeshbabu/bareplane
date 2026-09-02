@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"regexp"
@@ -11,6 +12,17 @@ import (
 const DefaultSSHPort = 22
 
 var dnsHostLabelPattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
+
+type BootstrapConfig struct {
+	SSH *SSHBootstrap `yaml:"ssh,omitempty"`
+}
+
+type SSHBootstrap struct {
+	User           string            `yaml:"user,omitempty"`
+	PrivateKeyFile string            `yaml:"privateKeyFile,omitempty"`
+	Port           int               `yaml:"port,omitempty"`
+	Hosts          map[string]string `yaml:"hosts,omitempty"`
+}
 
 func (s SSHBootstrap) EffectivePort() int {
 	if s.Port == 0 {
