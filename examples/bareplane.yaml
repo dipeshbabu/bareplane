@@ -1,0 +1,32 @@
+apiVersion: bareplane.io/v1alpha1
+kind: BareplaneCluster
+metadata:
+  name: homelab
+spec:
+  domain: lab.example.com
+  provider:
+    type: proxmox
+    endpoint: https://proxmox.example.com:8006
+  nodes:
+    - name: control-plane
+      role: control-plane
+      count: 3
+      cpu: 4
+      memoryGB: 8
+      diskGB: 64
+    - name: gpu-workers
+      role: worker
+      count: 2
+      cpu: 16
+      memoryGB: 64
+      diskGB: 256
+      gpu: true
+  features:
+    observability: true
+    gpu: true
+  profiles:
+    - ai
+  dns:
+    provider: cloudflare
+  secrets:
+    provider: sops
