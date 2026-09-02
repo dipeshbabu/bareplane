@@ -28,6 +28,7 @@ Commands:
   doctor     Check project and local environment readiness
   plan       Discover infrastructure and print a read-only change plan
   render     Render deterministic Terraform without applying it
+  terraform  Run read-only Terraform workflows
   version    Print build version information
   help       Show this help text
 `
@@ -61,6 +62,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runPlan(args[1:], stdout, stderr, runtime.ProviderDependencies{})
 	case "render":
 		return runRender(args[1:], stdout, stderr)
+	case "terraform":
+		return runTerraform(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n%s", args[0], usage)
 		return 2

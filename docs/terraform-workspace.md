@@ -11,7 +11,7 @@ For a project whose configuration is `bareplane.yaml`, the local layout is:
     main.tf.json
   state/
     terraform/                # persistent execution workspace; never replaced by render
-      data/                   # future TF_DATA_DIR
+      data/                   # TF_DATA_DIR for Terraform execution
       terraform.tfstate
       terraform.tfstate.backup
       .terraform.lock.hcl
@@ -22,7 +22,7 @@ For a project whose configuration is `bareplane.yaml`, the local layout is:
 
 `.bareplane/terraform` is owned by `bareplane render`. It is intentionally disposable and can be atomically replaced whenever the desired infrastructure changes.
 
-No Terraform state, provider cache, saved plan, or dependency lock that must survive rendering may be stored there.
+No Terraform state, provider data, saved plan, or canonical dependency lock that must survive rendering may be stored there.
 
 ## Persistent workspace
 
@@ -30,12 +30,14 @@ No Terraform state, provider cache, saved plan, or dependency lock that must sur
 
 Workspace creation is idempotent. Bareplane refuses a symlink or non-directory at its `.bareplane`, `state`, Terraform state, or Terraform data directory boundaries rather than following an unexpected workspace redirect.
 
-The dependency lock file has a persistent canonical path in the state workspace. A future Terraform runner may copy or synchronize that lock into the generated configuration directory when Terraform requires it, but rendering must not own the canonical copy.
+`bareplane terraform plan` uses this workspace directly. `TF_DATA_DIR` points to `data/`, the local state path is passed explicitly to Terraform, and the saved plan is written to `terraform.tfplan`.
+
+The dependency lock file has a persistent canonical path in the state workspace. Before Terraform initialization, Bareplane copies that lock into the generated configuration directory when one exists and uses read-only lock selection. After a successful first initialization, Bareplane persists the generated lock back into the state workspace.
 
 ## Lifecycle rule
 
-The invariant for future execution commands is:
+The invariant for Terraform execution is:
 
 > rendering may replace generated configuration, but it must never delete, replace, or silently reinitialize persistent Terraform state.
 
-This issue defines only the path and filesystem contract. It does not execute Terraform and does not mutate infrastructure.
+The current execution layer is still read-only with respect to infrastructure: it supports Terraform initialization and planning, but not apply, destroy, import, or Terraform state mutation commands.
