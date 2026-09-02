@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 )
 
@@ -59,18 +58,7 @@ func readTerraformVersion(
 }
 
 func terraformVersionEnvironment(base []string, dataDir string) []string {
-	if base == nil {
-		base = os.Environ()
-	}
-	filtered := make([]string, 0, len(base)+1)
-	for _, entry := range base {
-		key := environmentKey(entry)
-		if key == providerTokenEnv || key == "TF_DATA_DIR" {
-			continue
-		}
-		filtered = append(filtered, entry)
-	}
-	return append(filtered, "TF_DATA_DIR="+dataDir)
+	return controlledTerraformEnvironment(base, dataDir)
 }
 
 type limitedBuffer struct {
