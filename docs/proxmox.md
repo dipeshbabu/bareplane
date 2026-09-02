@@ -25,7 +25,22 @@ export BAREPLANE_PROXMOX_TOKEN_SECRET='...'
 
 Bareplane sends these using Proxmox's `PVEAPIToken` authorization header. The token secret is redacted from API error messages before they are returned to callers.
 
-Use a dedicated API token with the minimum privileges required for the operation. The current client only exposes read operations for the Proxmox version endpoint and cluster node listing.
+Use a dedicated API token with the minimum privileges required for the operation. The current client only exposes read operations.
+
+## Read-only discovery
+
+Bareplane can read cluster guest inventory from `/cluster/resources?type=vm`. The Proxmox runtime provider translates those resources into provider-neutral inventory containing:
+
+- stable provider ID (`qemu/<vmid>` or `lxc/<vmid>`)
+- guest name and kind
+- current Proxmox host node and status
+- configured CPU, memory, and disk capacity
+- template state
+- sorted guest tags
+
+Memory and disk byte capacities are rounded up to GiB when translated into Bareplane inventory. API response ordering does not affect the resulting inventory order.
+
+Discovery does **not** treat a guest as Bareplane-owned because its name resembles a generated Bareplane machine name. Tags are preserved as observed metadata, but ownership and destructive lifecycle rules require a separate explicit contract before Bareplane can mutate or delete existing guests.
 
 ## Client safety
 

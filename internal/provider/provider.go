@@ -29,11 +29,16 @@ type Inventory struct {
 type Node struct {
 	ID       string
 	Name     string
+	Kind     string
+	Host     string
+	Status   string
 	Role     string
 	CPU      int
 	MemoryGB int
 	DiskGB   int
 	GPU      bool
+	Template bool
+	Tags     []string
 }
 
 type Plan struct {
