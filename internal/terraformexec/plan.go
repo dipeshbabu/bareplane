@@ -228,6 +228,11 @@ func blockedTerraformEnvironmentKey(key string) bool {
 	return upper == "TF_DATA_DIR" ||
 		upper == "TF_WORKSPACE" ||
 		upper == "TF_CLI_ARGS" ||
+		upper == "TF_LOG" ||
+		upper == "TF_LOG_PATH" ||
+		upper == "TF_LOG_PROVIDER" ||
+		upper == proxmox.EnvTokenID ||
+		upper == proxmox.EnvTokenSecret ||
 		strings.HasPrefix(upper, "TF_CLI_ARGS_") ||
 		strings.HasPrefix(upper, "TF_VAR_") ||
 		strings.HasPrefix(upper, "PROXMOX_VE_")
