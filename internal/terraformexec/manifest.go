@@ -81,13 +81,21 @@ func CreatePlanManifest(configPath string, workspace project.TerraformWorkspace,
 	return manifest, nil
 }
 
-func VerifyPlanManifest(configPath string, workspace project.TerraformWorkspace) (PlanManifest, error) {
+func VerifyPlanManifest(configPath string, workspace project.TerraformWorkspace, terraformVersion string) (PlanManifest, error) {
 	manifest, err := readPlanManifest(workspace.PlanManifestFile)
 	if err != nil {
 		return PlanManifest{}, err
 	}
 	if manifest.Version != planManifestVersion {
 		return PlanManifest{}, fmt.Errorf("unsupported Terraform plan manifest version %d", manifest.Version)
+	}
+
+	terraformVersion = strings.TrimSpace(terraformVersion)
+	if terraformVersion == "" {
+		return PlanManifest{}, errors.New("current Terraform version is empty")
+	}
+	if manifest.TerraformVersion != terraformVersion {
+		return PlanManifest{}, fmt.Errorf("Terraform plan is stale: Terraform version changed from %q to %q", manifest.TerraformVersion, terraformVersion)
 	}
 
 	clusterName, err := manifestClusterName(configPath)
