@@ -13,6 +13,8 @@ func TestControlledTerraformEnvironmentRemovesUnsafeOverrides(t *testing.T) {
 		"PATH=/bin",
 		"TF_CLI_ARGS=-chdir=/tmp",
 		"TF_CLI_ARGS_apply=-destroy",
+		"TF_CLI_CONFIG_FILE=/tmp/terraform.rc",
+		"TF_REATTACH_PROVIDERS={}",
 		"TF_WORKSPACE=other",
 		"TF_VAR_injected=value",
 		"TF_LOG=TRACE",
@@ -38,7 +40,7 @@ func TestControlledTerraformEnvironmentRemovesUnsafeOverrides(t *testing.T) {
 
 	for _, entry := range environment {
 		key := strings.ToUpper(environmentKey(entry))
-		if key == "TF_WORKSPACE" || key == "TF_CLI_ARGS" || strings.HasPrefix(key, "TF_CLI_ARGS_") || strings.HasPrefix(key, "TF_VAR_") || strings.HasPrefix(key, "TF_LOG") {
+		if key == "TF_WORKSPACE" || key == "TF_CLI_ARGS" || key == "TF_CLI_CONFIG_FILE" || key == "TF_REATTACH_PROVIDERS" || strings.HasPrefix(key, "TF_CLI_ARGS_") || strings.HasPrefix(key, "TF_VAR_") || strings.HasPrefix(key, "TF_LOG") {
 			t.Fatalf("unsafe Terraform environment key survived: %q", key)
 		}
 		if key == proxmox.EnvTokenID || key == proxmox.EnvTokenSecret {
@@ -50,16 +52,25 @@ func TestControlledTerraformEnvironmentRemovesUnsafeOverrides(t *testing.T) {
 	}
 }
 
-func TestTerraformVersionEnvironmentContainsNoProviderCredential(t *testing.T) {
+func TestTerraformVersionEnvironmentContainsNoProviderCredentialOrExecutionOverride(t *testing.T) {
 	environment := terraformVersionEnvironment([]string{
 		"PATH=/bin",
 		proxmox.EnvTokenID + "=id",
 		proxmox.EnvTokenSecret + "=secret",
 		providerTokenEnv + "=combined",
 		"PROXMOX_VE_INSECURE=true",
+		"TF_CLI_CONFIG_FILE=/tmp/terraform.rc",
+		"TF_REATTACH_PROVIDERS={}",
 	}, "/private/data")
 
-	for _, key := range []string{proxmox.EnvTokenID, proxmox.EnvTokenSecret, providerTokenEnv, "PROXMOX_VE_INSECURE"} {
+	for _, key := range []string{
+		proxmox.EnvTokenID,
+		proxmox.EnvTokenSecret,
+		providerTokenEnv,
+		"PROXMOX_VE_INSECURE",
+		"TF_CLI_CONFIG_FILE",
+		"TF_REATTACH_PROVIDERS",
+	} {
 		if got := envValue(environment, key); got != "" {
 			t.Fatalf("credential/control environment %s leaked to version probe", key)
 		}
