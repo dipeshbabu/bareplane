@@ -7,6 +7,9 @@ spec:
   provider:
     type: proxmox
     endpoint: https://proxmox.example.com:8006
+    targets:
+      - pve1
+      - pve2
   nodes:
     - name: control-plane
       role: control-plane
@@ -21,6 +24,8 @@ spec:
       memoryGB: 64
       diskGB: 256
       gpu: true
+      targets:
+        - pve2
   features:
     observability: true
     gpu: true
