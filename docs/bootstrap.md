@@ -26,7 +26,7 @@ The host-map keys are deterministic Bareplane machine names. They must exactly m
 
 `Config.Validate()` treats bootstrap settings as optional. Existing validation, doctor, planning, rendering, and Terraform workflows therefore continue to work when no bootstrap block exists.
 
-`Config.ValidateBootstrap()` is the stronger prerequisite for future Kubernetes bootstrap workflows. It requires:
+`Config.ValidateBootstrap()` is the stronger prerequisite for bootstrap workflows. It requires:
 
 - an SSH username;
 - a private-key file path;
@@ -35,9 +35,30 @@ The host-map keys are deterministic Bareplane machine names. They must exactly m
 - a valid SSH port, with 22 used when omitted;
 - host values that are IPv4 addresses, IPv6 addresses, or DNS hostnames without schemes, paths, user information, whitespace, or embedded ports.
 
+## Render the inventory
+
+Once the bootstrap configuration is complete:
+
+```bash
+bareplane bootstrap render
+```
+
+Bareplane writes a managed inventory beside the project configuration:
+
+```text
+.bareplane/
+  bootstrap/
+    .bareplane-generated.json
+    inventory.yaml
+```
+
+The inventory contains deterministic `control_plane` and `workers` groups. Each machine includes `ansible_host`, `ansible_user`, `ansible_port`, and non-secret Bareplane metadata such as its node group, role, provider target when configured, GPU intent, CPU, memory, and disk capacity.
+
+The inventory renderer is offline. It performs no SSH connection and does not run Ansible. Re-rendering safely replaces only a directory that carries Bareplane's matching generation marker; an unrelated or symlinked destination is refused.
+
 ## Secret boundary
 
-`privateKeyFile` is a local path reference. Configuration validation does not read the file and Bareplane does not serialize private-key contents into generated infrastructure.
+`privateKeyFile` is a local path reference. Configuration validation and inventory rendering do not read the file. The path and private-key contents are deliberately omitted from `inventory.yaml`.
 
 The existing Proxmox provisioning SSH block serves a different purpose: it references a public key that cloud-init places on newly provisioned machines. The bootstrap SSH block identifies the corresponding local private key that a future SSH or Ansible runner will use.
 
@@ -45,4 +66,4 @@ Future execution code must keep private-key contents out of logs, generated inve
 
 ## Current limitation
 
-This configuration contract does not connect to machines, probe SSH, generate Ansible inventory, or run Kubernetes bootstrap. Those capabilities are intentionally separate changes so connectivity and mutation boundaries remain reviewable.
+Bareplane can validate bootstrap connectivity and render the inventory, but it does not yet probe SSH or run Kubernetes bootstrap. Those execution capabilities remain separate changes so connectivity and mutation boundaries stay reviewable.
