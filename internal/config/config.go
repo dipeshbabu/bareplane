@@ -28,13 +28,13 @@ type Metadata struct {
 }
 
 type Spec struct {
-	Domain   string         `yaml:"domain"`
-	Provider Provider       `yaml:"provider"`
-	Nodes    []NodeGroup    `yaml:"nodes"`
-	Features Features       `yaml:"features"`
-	Profiles []string       `yaml:"profiles"`
-	DNS      DNS            `yaml:"dns"`
-	Secrets  Secrets        `yaml:"secrets"`
+	Domain   string      `yaml:"domain"`
+	Provider Provider    `yaml:"provider"`
+	Nodes    []NodeGroup `yaml:"nodes"`
+	Features Features    `yaml:"features"`
+	Profiles []string    `yaml:"profiles"`
+	DNS      DNS         `yaml:"dns"`
+	Secrets  Secrets     `yaml:"secrets"`
 }
 
 type Provider struct {
