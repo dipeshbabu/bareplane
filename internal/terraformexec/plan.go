@@ -67,7 +67,7 @@ type PlanResult struct {
 	Changes bool
 }
 
-func Plan(ctx context.Context, options PlanOptions) (PlanResult, error) {
+func Plan(ctx context.Context, options PlanOptions) (result PlanResult, err error) {
 	if options.Runner == nil {
 		options.Runner = ExecRunner{}
 	}
@@ -86,6 +86,21 @@ func Plan(ctx context.Context, options PlanOptions) (PlanResult, error) {
 	if err := validateProvisioningConfig(options.ConfigPath); err != nil {
 		return PlanResult{}, err
 	}
+
+	operationLock, err := project.AcquireTerraformOperation(options.ConfigPath, "terraform-plan")
+	if err != nil {
+		return PlanResult{}, fmt.Errorf("acquire Terraform operation lock: %w", err)
+	}
+	defer func() {
+		if releaseErr := operationLock.Release(); releaseErr != nil {
+			if err == nil {
+				result = PlanResult{}
+				err = fmt.Errorf("release Terraform operation lock: %w", releaseErr)
+				return
+			}
+			err = fmt.Errorf("%v; release Terraform operation lock: %w", err, releaseErr)
+		}
+	}()
 
 	workspace, err := project.EnsureTerraformWorkspace(options.ConfigPath)
 	if err != nil {

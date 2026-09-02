@@ -51,6 +51,32 @@ jobs:
           terraform_version: 1.16.0
           terraform_wrapper: false
 
+      - name: Validate saved-plan apply command shape
+        run: |
+          workdir=$(mktemp -d)
+          trap 'rm -rf "$workdir"' EXIT
+          mkdir -p "$workdir/config" "$workdir/state" "$workdir/data"
+          cat > "$workdir/config/main.tf" <<'EOF'
+          resource "terraform_data" "smoke" {
+            input = "bareplane-saved-plan-smoke"
+          }
+          EOF
+          TF_DATA_DIR="$workdir/data" terraform -chdir="$workdir/config" init -backend=false -input=false -no-color
+          TF_DATA_DIR="$workdir/data" terraform -chdir="$workdir/config" plan \
+            -input=false \
+            -no-color \
+            -state="$workdir/state/terraform.tfstate" \
+            -out="$workdir/state/terraform.tfplan"
+          TF_DATA_DIR="$workdir/data" terraform -chdir="$workdir/config" apply \
+            -input=false \
+            -no-color \
+            -auto-approve \
+            -state="$workdir/state/terraform.tfstate" \
+            -state-out="$workdir/state/terraform.tfstate" \
+            -backup="$workdir/state/terraform.tfstate.backup" \
+            "$workdir/state/terraform.tfplan"
+          test -f "$workdir/state/terraform.tfstate"
+
       - name: Validate generated Terraform
         run: |
           workdir=$(mktemp -d)

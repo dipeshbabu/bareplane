@@ -32,6 +32,20 @@ func runRender(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	operationLock, err := project.AcquireTerraformOperation(configPath, "render")
+	if err != nil {
+		fmt.Fprintf(stderr, "render %s: acquire Terraform operation lock: %v\n", configPath, err)
+		return 1
+	}
+	code := runRenderLocked(configPath, cfg, stdout, stderr)
+	if err := operationLock.Release(); err != nil {
+		fmt.Fprintf(stderr, "render %s: release Terraform operation lock: %v\n", configPath, err)
+		return 1
+	}
+	return code
+}
+
+func runRenderLocked(configPath string, cfg config.Config, stdout, stderr io.Writer) int {
 	publicKeyPath, err := resolveConfiguredPath(configPath, cfg.Spec.Provider.Proxmox.SSH.PublicKeyFile)
 	if err != nil {
 		fmt.Fprintf(stderr, "render %s: resolve SSH public key: %v\n", configPath, err)
