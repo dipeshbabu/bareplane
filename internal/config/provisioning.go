@@ -1,7 +1,6 @@
 package config
 
 import (
-	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -86,27 +85,21 @@ func validCloudImageFileID(value string) bool {
 	if len(parts) != 2 || !proxmoxIdentifierPattern.MatchString(parts[0]) {
 		return false
 	}
+
 	path := parts[1]
-	if !strings.HasPrefix(path, "import/") && !strings.HasPrefix(path, "iso/") {
+	var file string
+	switch {
+	case strings.HasPrefix(path, "import/"):
+		file = strings.TrimPrefix(path, "import/")
+	case strings.HasPrefix(path, "iso/"):
+		file = strings.TrimPrefix(path, "iso/")
+	default:
 		return false
 	}
-	file := strings.TrimPrefix(strings.TrimPrefix(path, "import/"), "iso/")
-	return file != "" && file != "." && file != ".." && !strings.Contains(file, "\\")
+	return file != "" && file != "." && file != ".." && !strings.ContainsAny(file, "/\\")
 }
 
 func validPathValue(value string) bool {
 	trimmed := strings.TrimSpace(value)
 	return trimmed != "" && trimmed == value && !strings.ContainsAny(value, "\x00\r\n")
-}
-
-func ProvisioningSummary(c Config) string {
-	if c.Spec.Provider.Proxmox == nil {
-		return "proxmox provisioning is not configured"
-	}
-	return fmt.Sprintf(
-		"proxmox provisioning uses bridge %q, datastore %q, and %d target(s)",
-		c.Spec.Provider.Proxmox.Bridge,
-		c.Spec.Provider.Proxmox.SystemDatastore,
-		len(c.Spec.Provider.Targets),
-	)
 }
