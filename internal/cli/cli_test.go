@@ -47,6 +47,42 @@ func TestRunUnknownCommand(t *testing.T) {
 	}
 }
 
+func TestRunInitAndValidate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cluster", "bareplane.yaml")
+
+	var initOut, initErr bytes.Buffer
+	if code := Run([]string{"init", path}, &initOut, &initErr); code != 0 {
+		t.Fatalf("init exit code = %d: %s", code, initErr.String())
+	}
+	if !strings.Contains(initOut.String(), "created "+path) {
+		t.Fatalf("unexpected init output %q", initOut.String())
+	}
+
+	var validateOut, validateErr bytes.Buffer
+	if code := Run([]string{"validate", path}, &validateOut, &validateErr); code != 0 {
+		t.Fatalf("validate exit code = %d: %s", code, validateErr.String())
+	}
+	if !strings.Contains(validateOut.String(), `cluster "bareplane"`) {
+		t.Fatalf("unexpected validate output %q", validateOut.String())
+	}
+}
+
+func TestRunInitRefusesOverwrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bareplane.yaml")
+	if err := os.WriteFile(path, []byte("existing\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"init", path}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("expected exit code 1, got %d", code)
+	}
+	if !strings.Contains(stderr.String(), "refusing to overwrite") {
+		t.Fatalf("unexpected stderr %q", stderr.String())
+	}
+}
+
 func TestRunValidate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bareplane.yaml")
 	input := `apiVersion: bareplane.io/v1alpha1

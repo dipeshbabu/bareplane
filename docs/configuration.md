@@ -2,6 +2,22 @@
 
 Bareplane uses a single versioned `bareplane.yaml` file as the user-facing source of intent.
 
+## Initialize
+
+Create a starter configuration in the current directory:
+
+```bash
+bareplane init
+```
+
+Or choose an explicit path:
+
+```bash
+bareplane init clusters/dev/bareplane.yaml
+```
+
+Bareplane creates parent directories implied by the requested path, but it never overwrites an existing configuration. The generated file is a deterministic, minimal, valid configuration that can be checked immediately with `bareplane validate`.
+
 ## Contract
 
 The current schema is `bareplane.io/v1alpha1` with kind `BareplaneCluster`.
