@@ -38,9 +38,22 @@ type Spec struct {
 }
 
 type Provider struct {
-	Type     string   `yaml:"type"`
-	Endpoint string   `yaml:"endpoint,omitempty"`
-	Targets  []string `yaml:"targets,omitempty"`
+	Type     string                `yaml:"type"`
+	Endpoint string                `yaml:"endpoint,omitempty"`
+	Targets  []string              `yaml:"targets,omitempty"`
+	Proxmox  *ProxmoxProvisioning  `yaml:"proxmox,omitempty"`
+}
+
+type ProxmoxProvisioning struct {
+	Bridge           string          `yaml:"bridge"`
+	SystemDatastore  string          `yaml:"systemDatastore"`
+	CloudImageFileID string          `yaml:"cloudImageFileID"`
+	SSH              SSHProvisioning `yaml:"ssh"`
+}
+
+type SSHProvisioning struct {
+	User          string `yaml:"user"`
+	PublicKeyFile string `yaml:"publicKeyFile"`
 }
 
 type NodeGroup struct {
@@ -134,6 +147,8 @@ func (c Config) Validate() error {
 		}
 		providerTargets[target] = struct{}{}
 	}
+
+	problems = append(problems, validateOptionalProxmoxProvisioning(c.Spec.Provider.Proxmox)...)
 
 	if len(c.Spec.Nodes) == 0 {
 		problems = append(problems, "spec.nodes must contain at least one node group")
