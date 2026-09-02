@@ -56,6 +56,26 @@ The inventory contains deterministic `control_plane` and `workers` groups. Each 
 
 The inventory renderer is offline. It performs no SSH connection and does not run Ansible. Re-rendering safely replaces only a directory that carries Bareplane's matching generation marker; an unrelated or symlinked destination is refused.
 
+## Local bootstrap doctor
+
+Before any remote bootstrap workflow, run:
+
+```bash
+bareplane bootstrap doctor
+```
+
+This is a local-only readiness check. It verifies:
+
+- the bootstrap configuration is complete;
+- `.bareplane/bootstrap` is a valid Bareplane-managed render;
+- `inventory.yaml` is a regular file;
+- the configured SSH private key exists as a regular, non-symlink file;
+- on POSIX systems, the private key is not group- or world-readable;
+- `ssh` is installed;
+- `ansible-playbook` is installed.
+
+The command does not read or print private-key contents, contact any configured host, invoke SSH, run Ansible, call Proxmox, or mutate the project. A passing result means only that the local machine is prepared for a later remote connectivity preflight. It does not prove that hosts are reachable or that SSH authentication will succeed.
+
 ## Secret boundary
 
 `privateKeyFile` is a local path reference. Configuration validation and inventory rendering do not read the file. The path and private-key contents are deliberately omitted from `inventory.yaml`.
@@ -66,4 +86,4 @@ Future execution code must keep private-key contents out of logs, generated inve
 
 ## Current limitation
 
-Bareplane can validate bootstrap connectivity and render the inventory, but it does not yet probe SSH or run Kubernetes bootstrap. Those execution capabilities remain separate changes so connectivity and mutation boundaries stay reviewable.
+Bareplane can validate bootstrap connectivity, render the inventory, and verify local bootstrap readiness. It does not yet probe remote SSH connectivity or run Kubernetes bootstrap. Those execution capabilities remain separate changes so connectivity and mutation boundaries stay reviewable.
