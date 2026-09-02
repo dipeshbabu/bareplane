@@ -15,8 +15,8 @@ import (
 func TestInspectReadyProjectPassesAllChecks(t *testing.T) {
 	configPath, keyPath := setupReadyProject(t)
 	report := Inspect(Options{
-		ConfigPath: configPath,
-		LookPath: func(name string) (string, error) { return "/usr/bin/" + name, nil },
+		ConfigPath:  configPath,
+		LookPath:    func(name string) (string, error) { return "/usr/bin/" + name, nil },
 		UserHomeDir: func() (string, error) { return filepath.Dir(filepath.Dir(keyPath)), nil },
 	})
 	if report.HasFailures() {
@@ -30,8 +30,8 @@ func TestInspectReadyProjectPassesAllChecks(t *testing.T) {
 func TestInspectMissingInventoryFails(t *testing.T) {
 	configPath, keyPath := setupConfigAndKey(t)
 	report := Inspect(Options{
-		ConfigPath: configPath,
-		LookPath: availableTool,
+		ConfigPath:  configPath,
+		LookPath:    availableTool,
 		UserHomeDir: func() (string, error) { return filepath.Dir(filepath.Dir(keyPath)), nil },
 	})
 	assertFailed(t, report, "inventory")
