@@ -41,6 +41,22 @@ type NodeInfo struct {
 	Uptime    int64   `json:"uptime"`
 }
 
+type VMResource struct {
+	VMID      int     `json:"vmid"`
+	Type      string  `json:"type"`
+	Name      string  `json:"name"`
+	Node      string  `json:"node"`
+	Status    string  `json:"status"`
+	CPU       float64 `json:"cpu"`
+	MaxCPU    int     `json:"maxcpu"`
+	Memory    int64   `json:"mem"`
+	MaxMemory int64   `json:"maxmem"`
+	Disk      int64   `json:"disk"`
+	MaxDisk   int64   `json:"maxdisk"`
+	Template  int     `json:"template"`
+	Tags      string  `json:"tags"`
+}
+
 type APIError struct {
 	Method     string
 	Path       string
@@ -82,14 +98,20 @@ func NewClient(endpoint string, credentials Credentials, httpClient *http.Client
 }
 
 func (c *Client) Version(ctx context.Context) (Version, error) {
-	return get[Version](ctx, c, "/version")
+	return get[Version](ctx, c, "/version", nil)
 }
 
 func (c *Client) Nodes(ctx context.Context) ([]NodeInfo, error) {
-	return get[[]NodeInfo](ctx, c, "/nodes")
+	return get[[]NodeInfo](ctx, c, "/nodes", nil)
 }
 
-func get[T any](ctx context.Context, c *Client, path string) (T, error) {
+func (c *Client) VMResources(ctx context.Context) ([]VMResource, error) {
+	query := url.Values{}
+	query.Set("type", "vm")
+	return get[[]VMResource](ctx, c, "/cluster/resources", query)
+}
+
+func get[T any](ctx context.Context, c *Client, path string, query url.Values) (T, error) {
 	var zero T
 	if c == nil || c.baseURL == nil || c.httpClient == nil {
 		return zero, errors.New("proxmox client is not initialized")
@@ -98,7 +120,7 @@ func get[T any](ctx context.Context, c *Client, path string) (T, error) {
 	requestURL := *c.baseURL
 	requestURL.Path = strings.TrimRight(requestURL.Path, "/") + "/api2/json" + path
 	requestURL.RawPath = ""
-	requestURL.RawQuery = ""
+	requestURL.RawQuery = query.Encode()
 	requestURL.Fragment = ""
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL.String(), nil)
