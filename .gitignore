@@ -1,0 +1,17 @@
+# Build outputs
+/bin/
+/dist/
+
+# Go
+*.test
+*.out
+coverage.out
+
+# Local configuration
+bareplane.local.yaml
+.env
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
