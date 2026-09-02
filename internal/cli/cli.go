@@ -118,7 +118,7 @@ func runDoctor(
 	stdout io.Writer,
 	stderr io.Writer,
 	lookPath doctor.LookPathFunc,
-	providerProbe doctor.ProviderProbe,
+	providerProbes ...doctor.ProviderProbe,
 ) int {
 	if len(args) > 1 {
 		fmt.Fprintln(stderr, "usage: bareplane doctor [path]")
@@ -128,6 +128,11 @@ func runDoctor(
 	path := "bareplane.yaml"
 	if len(args) == 1 {
 		path = args[0]
+	}
+
+	var providerProbe doctor.ProviderProbe
+	if len(providerProbes) > 0 {
+		providerProbe = providerProbes[0]
 	}
 
 	registry, err := builtin.Registry()
