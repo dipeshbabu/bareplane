@@ -83,7 +83,7 @@ func TestTerraformOperationLockMetadataIsPrivate(t *testing.T) {
 	}
 }
 
-func TestTerraformOperationLockRefusesStaleOrUnownedLock(t *testing.T) {
+func TestTerraformOperationLockReportsReadableStaleLock(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "bareplane.yaml")
 	workspace, err := EnsureTerraformWorkspace(configPath)
 	if err != nil {
@@ -93,13 +93,18 @@ func TestTerraformOperationLockRefusesStaleOrUnownedLock(t *testing.T) {
 	if err := os.Mkdir(lockPath, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(lockPath, terraformOperationLockMetadata), []byte(`{"version":1,"operation":"render","pid":99999,"token":"other"}`), 0o600); err != nil {
+	metadata := []byte(`{"version":1,"operation":"render","pid":99999,"token":"other"}`)
+	metadata = []byte(strings.ReplaceAll(string(metadata), `\"`, `"`))
+	if err := os.WriteFile(filepath.Join(lockPath, terraformOperationLockMetadata), metadata, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	_, err = AcquireTerraformOperation(configPath, "terraform-plan")
 	if !errors.Is(err, ErrTerraformOperationLocked) {
 		t.Fatalf("expected stale lock refusal, got %v", err)
+	}
+	if !strings.Contains(err.Error(), `operation "render"`) || !strings.Contains(err.Error(), "99999") {
+		t.Fatalf("expected readable stale-lock diagnostics, got %v", err)
 	}
 }
 
@@ -130,12 +135,8 @@ func TestTerraformOperationLockReleaseChecksOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	metadataPath := filepath.Join(lock.path, terraformOperationLockMetadata)
-	metadata, err := readOperationLockMetadata(lock.path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	metadata.Token = "replacement-owner"
 	data := []byte(`{"version":1,"operation":"render","pid":1,"token":"replacement-owner"}`)
+	data = []byte(strings.ReplaceAll(string(data), `\"`, `"`))
 	if err := os.WriteFile(metadataPath, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +146,6 @@ func TestTerraformOperationLockReleaseChecksOwnership(t *testing.T) {
 	if _, err := os.Stat(lock.path); err != nil {
 		t.Fatalf("unowned lock was removed: %v", err)
 	}
-	_ = metadata
 }
 
 func TestTerraformOperationLockRejectsInvalidOperationName(t *testing.T) {
