@@ -25,10 +25,11 @@ Usage:
 Commands:
   init       Create a starter bareplane.yaml
   validate   Validate bareplane.yaml
+  status     Inspect local Bareplane project lifecycle state
   doctor     Check project and local environment readiness
   plan       Discover infrastructure and print a read-only change plan
   render     Render deterministic Terraform without applying it
-  terraform  Run read-only Terraform workflows
+  terraform  Run guarded Terraform workflows
   version    Print build version information
   help       Show this help text
 `
@@ -50,6 +51,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runInit(args[1:], stdout, stderr)
 	case "validate":
 		return runValidate(args[1:], stdout, stderr)
+	case "status":
+		return runStatus(args[1:], stdout, stderr)
 	case "doctor":
 		return runDoctor(
 			args[1:],
