@@ -58,8 +58,8 @@ func parseEndpoint(raw string) (*url.URL, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse endpoint: %w", err)
 	}
-	if parsed.Scheme != "https" && parsed.Scheme != "http" {
-		return nil, fmt.Errorf("endpoint scheme must be http or https")
+	if parsed.Scheme != "https" {
+		return nil, fmt.Errorf("endpoint scheme must be https")
 	}
 	if parsed.Host == "" {
 		return nil, fmt.Errorf("endpoint host is required")
