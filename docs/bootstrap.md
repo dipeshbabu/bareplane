@@ -74,16 +74,35 @@ This is a local-only readiness check. It verifies:
 - `ssh` is installed;
 - `ansible-playbook` is installed.
 
-The command does not read or print private-key contents, contact any configured host, invoke SSH, run Ansible, call Proxmox, or mutate the project. A passing result means only that the local machine is prepared for a later remote connectivity preflight. It does not prove that hosts are reachable or that SSH authentication will succeed.
+The command does not read or print private-key contents, contact any configured host, invoke SSH, run Ansible, call Proxmox, or mutate the project.
+
+## Remote SSH service check
+
+After local readiness passes, run:
+
+```bash
+bareplane bootstrap check
+```
+
+This preflight probes every configured machine in deterministic name order. For each host Bareplane:
+
+1. opens a timeout-bounded TCP connection to the configured SSH port;
+2. reads only the first SSH identification line, capped at 255 bytes;
+3. requires a CRLF-terminated `SSH-2.0-` or compatibility `SSH-1.99-` identification;
+4. closes the connection.
+
+Bareplane sends no private key, password, API token, SSH authentication packet, SSH command, or application payload. Failure output intentionally does not echo raw network errors or complete server banners.
+
+A PASS proves only that the configured endpoint is reachable and presents an SSH service. It does **not** verify the server host key, machine identity, SSH authentication, authorization, Python availability, sudo access, or Ansible compatibility.
 
 ## Secret boundary
 
-`privateKeyFile` is a local path reference. Configuration validation and inventory rendering do not read the file. The path and private-key contents are deliberately omitted from `inventory.yaml`.
+`privateKeyFile` is a local path reference. Configuration validation and inventory rendering do not read the file. The path and private-key contents are deliberately omitted from `inventory.yaml` and are not used by the SSH service check.
 
-The existing Proxmox provisioning SSH block serves a different purpose: it references a public key that cloud-init places on newly provisioned machines. The bootstrap SSH block identifies the corresponding local private key that a future SSH or Ansible runner will use.
+The existing Proxmox provisioning SSH block serves a different purpose: it references a public key that cloud-init places on newly provisioned machines. The bootstrap SSH block identifies the corresponding local private key that a future authenticated SSH or Ansible runner will use.
 
 Future execution code must keep private-key contents out of logs, generated inventory, command-line arguments, and persisted Bareplane metadata.
 
 ## Current limitation
 
-Bareplane can validate bootstrap connectivity, render the inventory, and verify local bootstrap readiness. It does not yet probe remote SSH connectivity or run Kubernetes bootstrap. Those execution capabilities remain separate changes so connectivity and mutation boundaries stay reviewable.
+Bareplane can validate bootstrap connectivity, render the inventory, verify local readiness, and confirm that configured endpoints expose an SSH service. It does not yet authenticate over SSH or run Kubernetes bootstrap. Those execution capabilities remain separate changes so connectivity and mutation boundaries stay reviewable.
