@@ -54,6 +54,22 @@ func Apply(ctx context.Context, options ApplyOptions) (ApplyResult, error) {
 		return ApplyResult{}, errors.New("Proxmox API token credentials are required")
 	}
 
+	operationLock, err := project.AcquireTerraformOperation(options.ConfigPath, "terraform-apply")
+	if err != nil {
+		return ApplyResult{}, fmt.Errorf("acquire Terraform operation lock: %w", err)
+	}
+	result, operationErr := applyLocked(ctx, options, cfg)
+	releaseErr := operationLock.Release()
+	if releaseErr != nil {
+		if operationErr == nil {
+			return ApplyResult{}, fmt.Errorf("Terraform apply completed but operation lock release failed: %w", releaseErr)
+		}
+		return ApplyResult{}, fmt.Errorf("%v; release Terraform operation lock: %w", operationErr, releaseErr)
+	}
+	return result, operationErr
+}
+
+func applyLocked(ctx context.Context, options ApplyOptions, cfg config.Config) (ApplyResult, error) {
 	workspace, err := project.EnsureTerraformWorkspace(options.ConfigPath)
 	if err != nil {
 		return ApplyResult{}, fmt.Errorf("prepare Terraform workspace: %w", err)
@@ -114,7 +130,9 @@ func Apply(ctx context.Context, options ApplyOptions) (ApplyResult, error) {
 	}
 
 	// Re-check all attested inputs after initialization and immediately before
-	// invalidating the manifest and beginning the mutation attempt.
+	// invalidating the manifest and beginning the mutation attempt. The project
+	// operation lock prevents Bareplane render/plan from changing these files
+	// between this check and the apply command.
 	if _, err := VerifyPlanManifest(options.ConfigPath, workspace, terraformVersion); err != nil {
 		return ApplyResult{}, fmt.Errorf("verify Terraform saved plan after init: %w", err)
 	}
