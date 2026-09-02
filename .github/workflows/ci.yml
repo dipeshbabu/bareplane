@@ -25,7 +25,13 @@ jobs:
           cache: true
 
       - name: Verify formatting
-        run: test -z "$(gofmt -l $(find . -name '*.go' -not -path './vendor/*'))"
+        run: |
+          unformatted=$(gofmt -l $(find . -name '*.go' -not -path './vendor/*'))
+          if [ -n "$unformatted" ]; then
+            printf 'Unformatted files:\n%s\n' "$unformatted"
+            gofmt -d $unformatted
+            exit 1
+          fi
 
       - name: Vet
         run: go vet ./...
