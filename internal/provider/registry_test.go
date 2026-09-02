@@ -13,7 +13,7 @@ type testProvider struct {
 	validateErr  error
 }
 
-func (p testProvider) Type() string { return p.providerType }
+func (p testProvider) Type() string                   { return p.providerType }
 func (p testProvider) Validate(config.Provider) error { return p.validateErr }
 
 func TestRegistryResolve(t *testing.T) {
