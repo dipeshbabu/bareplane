@@ -4,14 +4,19 @@ on:
   pull_request_target:
     types:
       - closed
+  push:
+    branches:
+      - main
 
 permissions:
   contents: write
+  pull-requests: read
 
 jobs:
   delete-branch:
     name: Delete merged topic branch
     if: >-
+      github.event_name == 'pull_request_target' &&
       github.event.pull_request.merged == true &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.head.ref != github.event.repository.default_branch
@@ -23,3 +28,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${HEAD_REF}"
+
+  prune-merged-branches:
+    name: Prune stale merged branches
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Delete unchanged merged refs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls?state=closed&per_page=100" \
+            --jq '.[] | select(.merged_at != null and .head.repo.full_name == .base.repo.full_name and .head.ref != .base.ref) | [.head.ref, .head.sha] | @tsv' |
+          sort -u |
+          while IFS=$'\t' read -r ref merged_sha; do
+            current_sha=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${ref}" --jq '.object.sha' 2>/dev/null || true)
+            if [ -n "${current_sha}" ] && [ "${current_sha}" = "${merged_sha}" ]; then
+              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${ref}"
+            fi
+          done
