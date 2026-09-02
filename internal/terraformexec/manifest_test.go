@@ -1,12 +1,13 @@
 package terraformexec
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/dipeshbabu/bareplane/internal/project"
 )
 
 func TestPlanManifestRoundTripIsDeterministic(t *testing.T) {
@@ -69,7 +70,7 @@ func TestVerifyPlanManifestDetectsChangedConfig(t *testing.T) {
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	assertStale(t, VerifyPlanManifest(configPath, workspace, "1.16.0"), "Bareplane configuration")
+	assertManifestStale(t, configPath, workspace, "1.16.0", "Bareplane configuration")
 }
 
 func TestVerifyPlanManifestDetectsRerenderedTerraform(t *testing.T) {
@@ -80,7 +81,7 @@ func TestVerifyPlanManifestDetectsRerenderedTerraform(t *testing.T) {
 	if err := replaceGeneratedForManifestTest(workspace.GeneratedDir, "{\"changed\":true}\n"); err != nil {
 		t.Fatal(err)
 	}
-	assertStale(t, VerifyPlanManifest(configPath, workspace, "1.16.0"), "generated Terraform")
+	assertManifestStale(t, configPath, workspace, "1.16.0", "generated Terraform")
 }
 
 func TestVerifyPlanManifestDetectsChangedLock(t *testing.T) {
@@ -91,7 +92,7 @@ func TestVerifyPlanManifestDetectsChangedLock(t *testing.T) {
 	if err := os.WriteFile(workspace.LockFile, []byte("changed-lock\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	assertStale(t, VerifyPlanManifest(configPath, workspace, "1.16.0"), "dependency lock")
+	assertManifestStale(t, configPath, workspace, "1.16.0", "dependency lock")
 }
 
 func TestVerifyPlanManifestDetectsChangedSavedPlan(t *testing.T) {
@@ -102,7 +103,7 @@ func TestVerifyPlanManifestDetectsChangedSavedPlan(t *testing.T) {
 	if err := os.WriteFile(workspace.PlanFile, []byte("changed-plan"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	assertStale(t, VerifyPlanManifest(configPath, workspace, "1.16.0"), "saved plan")
+	assertManifestStale(t, configPath, workspace, "1.16.0", "saved plan")
 }
 
 func TestVerifyPlanManifestDetectsTerraformVersionChange(t *testing.T) {
@@ -110,7 +111,7 @@ func TestVerifyPlanManifestDetectsTerraformVersionChange(t *testing.T) {
 	if _, err := CreatePlanManifest(configPath, workspace, "1.16.0"); err != nil {
 		t.Fatal(err)
 	}
-	assertStale(t, VerifyPlanManifest(configPath, workspace, "1.17.0"), "Terraform version changed")
+	assertManifestStale(t, configPath, workspace, "1.17.0", "Terraform version changed")
 }
 
 func TestVerifyPlanManifestRejectsMissingManifest(t *testing.T) {
@@ -163,7 +164,7 @@ func TestVerifyPlanManifestRejectsSymlinkGeneratedEntry(t *testing.T) {
 	}
 }
 
-func setupManifestContext(t *testing.T) (string, projectWorkspace) {
+func setupManifestContext(t *testing.T) (string, project.TerraformWorkspace) {
 	t.Helper()
 	configPath, workspace := setupTerraformProject(t)
 	if err := os.WriteFile(workspace.LockFile, []byte("lock-v1\n"), 0o600); err != nil {
@@ -172,11 +173,7 @@ func setupManifestContext(t *testing.T) (string, projectWorkspace) {
 	if err := os.WriteFile(workspace.PlanFile, []byte("saved-plan-v1"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return configPath, projectWorkspace{workspace}
-}
-
-type projectWorkspace struct {
-	project.TerraformWorkspace
+	return configPath, workspace
 }
 
 func replaceGeneratedForManifestTest(destination, content string) error {
@@ -185,11 +182,10 @@ func replaceGeneratedForManifestTest(destination, content string) error {
 	})
 }
 
-func assertStale(t *testing.T, _ PlanManifest, err error, contains string) {
+func assertManifestStale(t *testing.T, configPath string, workspace project.TerraformWorkspace, version, contains string) {
 	t.Helper()
+	_, err := VerifyPlanManifest(configPath, workspace, version)
 	if err == nil || !strings.Contains(err.Error(), contains) {
 		t.Fatalf("expected stale plan error containing %q, got %v", contains, err)
 	}
 }
-
-var _ = errors.Is
