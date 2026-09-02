@@ -26,6 +26,7 @@ func TestNewRejectsUnsafeEndpointForms(t *testing.T) {
 	for _, endpoint := range []string{
 		"",
 		"proxmox.example.com:8006",
+		"http://proxmox.example.com:8006",
 		"ftp://proxmox.example.com",
 		"https://user:pass@proxmox.example.com:8006",
 		"https://proxmox.example.com:8006?token=secret",
