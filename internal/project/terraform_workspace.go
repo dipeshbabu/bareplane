@@ -43,7 +43,7 @@ func TerraformWorkspaceFor(configPath string) (TerraformWorkspace, error) {
 		StateBackupFile:  filepath.Join(stateDir, "terraform.tfstate.backup"),
 		LockFile:         filepath.Join(stateDir, ".terraform.lock.hcl"),
 		PlanFile:         filepath.Join(stateDir, "terraform.tfplan"),
-		PlanManifestFile: filepath.Join(stateDir, "terraform-plan.json"),
+		PlanManifestFile: filepath.Join(stateDir, "terraform.tfplan.json"),
 	}, nil
 }
 
