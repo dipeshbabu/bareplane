@@ -10,11 +10,15 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/dipeshbabu/bareplane/internal/config"
 	"github.com/dipeshbabu/bareplane/internal/project"
 	"github.com/dipeshbabu/bareplane/internal/provider/proxmox"
 )
 
-const providerTokenEnv = "PROXMOX_VE_API_TOKEN"
+const (
+	providerTokenEnv = "PROXMOX_VE_API_TOKEN"
+	maxLockFileBytes = 4 * 1024 * 1024
+)
 
 type Command struct {
 	Binary string
@@ -79,6 +83,9 @@ func Plan(ctx context.Context, options PlanOptions) (PlanResult, error) {
 	if strings.TrimSpace(options.Credentials.TokenID) == "" || strings.TrimSpace(options.Credentials.TokenSecret) == "" {
 		return PlanResult{}, errors.New("Proxmox API token credentials are required")
 	}
+	if err := validateProvisioningConfig(options.ConfigPath); err != nil {
+		return PlanResult{}, err
+	}
 
 	workspace, err := project.EnsureTerraformWorkspace(options.ConfigPath)
 	if err != nil {
@@ -86,6 +93,12 @@ func Plan(ctx context.Context, options PlanOptions) (PlanResult, error) {
 	}
 	if err := project.RequireGeneratedDirectory(workspace.GeneratedDir, "terraform"); err != nil {
 		return PlanResult{}, fmt.Errorf("generated Terraform is not ready: %w", err)
+	}
+	if err := requireRegularFileOrMissing(workspace.StateFile, true); err != nil {
+		return PlanResult{}, fmt.Errorf("validate Terraform state path: %w", err)
+	}
+	if err := removeRegularFileIfPresent(workspace.PlanFile); err != nil {
+		return PlanResult{}, fmt.Errorf("prepare Terraform plan path: %w", err)
 	}
 
 	generatedLock := filepath.Join(workspace.GeneratedDir, ".terraform.lock.hcl")
@@ -149,6 +162,23 @@ func Plan(ctx context.Context, options PlanOptions) (PlanResult, error) {
 	}
 }
 
+func validateProvisioningConfig(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open configuration: %w", err)
+	}
+	defer file.Close()
+
+	cfg, err := config.Load(file)
+	if err != nil {
+		return fmt.Errorf("load configuration: %w", err)
+	}
+	if err := cfg.ValidateProvisioning(); err != nil {
+		return fmt.Errorf("configuration is not provisioning-ready: %w", err)
+	}
+	return nil
+}
+
 func runExpected(ctx context.Context, runner Runner, command Command, expected int) error {
 	exitCode, err := runner.Run(ctx, command)
 	if err != nil {
@@ -186,11 +216,21 @@ func environmentKey(entry string) string {
 }
 
 func copyIfExists(source, destination string, mode os.FileMode) (bool, error) {
-	data, err := os.ReadFile(source)
+	info, err := os.Lstat(source)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return false, nil
 		}
+		return false, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return false, fmt.Errorf("%s must be a regular file", source)
+	}
+	if info.Size() > maxLockFileBytes {
+		return false, fmt.Errorf("%s exceeds %d bytes", source, maxLockFileBytes)
+	}
+	data, err := os.ReadFile(source)
+	if err != nil {
 		return false, err
 	}
 	if err := writeAtomic(destination, data, mode); err != nil {
@@ -200,6 +240,9 @@ func copyIfExists(source, destination string, mode os.FileMode) (bool, error) {
 }
 
 func writeAtomic(path string, data []byte, mode os.FileMode) error {
+	if err := requireRegularFileOrMissing(path, false); err != nil {
+		return err
+	}
 	directory := filepath.Dir(path)
 	temporary, err := os.CreateTemp(directory, ".bareplane-write-*")
 	if err != nil {
@@ -228,10 +271,63 @@ func writeAtomic(path string, data []byte, mode os.FileMode) error {
 	if err := temporary.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(temporaryPath, path); err != nil {
+	if err := replaceFile(temporaryPath, path); err != nil {
 		return err
 	}
 	remove = false
+	return nil
+}
+
+func replaceFile(source, destination string) error {
+	if _, err := os.Lstat(destination); errors.Is(err, os.ErrNotExist) {
+		return os.Rename(source, destination)
+	} else if err != nil {
+		return err
+	}
+
+	backup := destination + ".bareplane-backup"
+	if err := os.Remove(backup); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.Rename(destination, backup); err != nil {
+		return err
+	}
+	if err := os.Rename(source, destination); err != nil {
+		_ = os.Rename(backup, destination)
+		return err
+	}
+	if err := os.Remove(backup); err != nil {
+		return err
+	}
+	return nil
+}
+
+func requireRegularFileOrMissing(path string, secure bool) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return fmt.Errorf("%s must be a regular file", path)
+	}
+	if secure {
+		if err := os.Chmod(path, 0o600); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func removeRegularFileIfPresent(path string) error {
+	if err := requireRegularFileOrMissing(path, true); err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	return nil
 }
 
