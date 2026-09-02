@@ -13,6 +13,7 @@ import (
 	"github.com/dipeshbabu/bareplane/internal/doctor"
 	"github.com/dipeshbabu/bareplane/internal/project"
 	"github.com/dipeshbabu/bareplane/internal/provider/builtin"
+	"github.com/dipeshbabu/bareplane/internal/runtime"
 	"github.com/dipeshbabu/bareplane/internal/version"
 )
 
@@ -47,7 +48,13 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case "validate":
 		return runValidate(args[1:], stdout, stderr)
 	case "doctor":
-		return runDoctor(args[1:], stdout, stderr, exec.LookPath)
+		return runDoctor(
+			args[1:],
+			stdout,
+			stderr,
+			exec.LookPath,
+			runtime.ProviderProbe(runtime.ProbeDependencies{}),
+		)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n%s", args[0], usage)
 		return 2
@@ -106,7 +113,13 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func runDoctor(args []string, stdout, stderr io.Writer, lookPath doctor.LookPathFunc) int {
+func runDoctor(
+	args []string,
+	stdout io.Writer,
+	stderr io.Writer,
+	lookPath doctor.LookPathFunc,
+	providerProbe doctor.ProviderProbe,
+) int {
 	if len(args) > 1 {
 		fmt.Fprintln(stderr, "usage: bareplane doctor [path]")
 		return 2
@@ -123,9 +136,10 @@ func runDoctor(args []string, stdout, stderr io.Writer, lookPath doctor.LookPath
 		return 1
 	}
 	checks, err := doctor.Checks(doctor.Options{
-		ConfigPath: path,
-		LookPath:   lookPath,
-		Registry:   registry,
+		ConfigPath:    path,
+		LookPath:      lookPath,
+		Registry:      registry,
+		ProviderProbe: providerProbe,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "initialize doctor checks: %v\n", err)
