@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/dipeshbabu/bareplane/internal/config"
@@ -84,6 +85,20 @@ func TestRuntimeProviderDoesNotInferOwnershipFromName(t *testing.T) {
 	}
 	if got := inventory.Nodes[0].Tags; len(got) != 0 {
 		t.Fatalf("expected no ownership metadata to be invented, got tags %#v", got)
+	}
+}
+
+func TestNewRuntimeRejectsClientForDifferentEndpoint(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, testCredentials(), server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewRuntime(config.Provider{Type: Type, Endpoint: "https://other.example.com:8006"}, client)
+	if err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("expected endpoint mismatch error, got %v", err)
 	}
 }
 
