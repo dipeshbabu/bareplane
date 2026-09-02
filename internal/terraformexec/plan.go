@@ -66,7 +66,7 @@ type PlanResult struct {
 	Changes bool
 }
 
-func Plan(ctx context.Context, options PlanOptions) (PlanResult, error) {
+func Plan(ctx context.Context, options PlanOptions) (result PlanResult, err error) {
 	if options.Runner == nil {
 		options.Runner = ExecRunner{}
 	}
@@ -85,6 +85,21 @@ func Plan(ctx context.Context, options PlanOptions) (PlanResult, error) {
 	if _, err := loadProvisioningConfig(options.ConfigPath); err != nil {
 		return PlanResult{}, err
 	}
+
+	operationLock, err := project.AcquireTerraformOperation(options.ConfigPath, "terraform-plan")
+	if err != nil {
+		return PlanResult{}, fmt.Errorf("acquire Terraform operation lock: %w", err)
+	}
+	defer func() {
+		if releaseErr := operationLock.Release(); releaseErr != nil {
+			if err == nil {
+				result = PlanResult{}
+				err = fmt.Errorf("release Terraform operation lock: %w", releaseErr)
+				return
+			}
+			err = fmt.Errorf("%v; release Terraform operation lock: %w", err, releaseErr)
+		}
+	}()
 
 	workspace, err := project.EnsureTerraformWorkspace(options.ConfigPath)
 	if err != nil {
@@ -134,7 +149,7 @@ func Plan(ctx context.Context, options PlanOptions) (PlanResult, error) {
 		Stdout: options.Stdout,
 		Stderr: options.Stderr,
 	}, 0); err != nil {
-		return PlanResult{}, fmt.Errorf("terraform init failed: %w", err)
+		return PlanResult{}, fmt.Errorf("terraform init failed: %w", redactTerraformError(err, options.Credentials))
 	}
 
 	if _, err := copyIfExists(generatedLock, workspace.LockFile, 0o600); err != nil {
@@ -149,7 +164,7 @@ func Plan(ctx context.Context, options PlanOptions) (PlanResult, error) {
 		"-state=" + workspace.StateFile,
 		"-out=" + workspace.PlanFile,
 	}
-	exitCode, err := options.Runner.Run(ctx, Command{
+	exitCode, runErr := options.Runner.Run(ctx, Command{
 		Binary: options.TerraformBinary,
 		Args:   planArgs,
 		Dir:    workspace.GeneratedDir,
@@ -157,8 +172,8 @@ func Plan(ctx context.Context, options PlanOptions) (PlanResult, error) {
 		Stdout: options.Stdout,
 		Stderr: options.Stderr,
 	})
-	if err != nil {
-		return PlanResult{}, fmt.Errorf("run terraform plan: %w", err)
+	if runErr != nil {
+		return PlanResult{}, fmt.Errorf("run terraform plan: %w", redactTerraformError(runErr, options.Credentials))
 	}
 
 	var changes bool
