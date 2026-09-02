@@ -12,11 +12,13 @@ import (
 )
 
 type LookPathFunc func(string) (string, error)
+type ProviderProbe func(context.Context, config.Config) Result
 
 type Options struct {
-	ConfigPath string
-	LookPath   LookPathFunc
-	Registry   *provider.Registry
+	ConfigPath    string
+	LookPath      LookPathFunc
+	Registry      *provider.Registry
+	ProviderProbe ProviderProbe
 }
 
 func Checks(opts Options) ([]Check, error) {
@@ -34,11 +36,16 @@ func Checks(opts Options) ([]Check, error) {
 	checks := []Check{
 		configCheck(source),
 		providerCheck(source, opts.Registry),
+	}
+	if opts.ProviderProbe != nil {
+		checks = append(checks, providerRuntimeCheck(source, opts.ProviderProbe))
+	}
+	checks = append(checks,
 		executableCheck("terraform", true, opts.LookPath),
 		executableCheck("ansible-playbook", true, opts.LookPath),
 		executableCheck("kubectl", true, opts.LookPath),
 		executableCheck("helm", false, opts.LookPath),
-	}
+	)
 	return checks, nil
 }
 
@@ -100,6 +107,20 @@ func providerCheck(source *configSource, registry *provider.Registry) Check {
 			Status:  StatusPass,
 			Message: fmt.Sprintf("%s configuration is valid", resolved.Type()),
 		}
+	})
+}
+
+func providerRuntimeCheck(source *configSource, probe ProviderProbe) Check {
+	return CheckFunc(func(ctx context.Context) Result {
+		cfg, err := source.load()
+		if err != nil {
+			return Result{
+				Name:    "provider runtime",
+				Status:  StatusWarn,
+				Message: "skipped because configuration is invalid",
+			}
+		}
+		return probe(ctx, cfg)
 	})
 }
 
