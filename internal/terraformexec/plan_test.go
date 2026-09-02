@@ -138,9 +138,36 @@ func TestPlanRehydratesPersistentLockReadonly(t *testing.T) {
 	}
 }
 
+func TestPlanRejectsSymlinkedPersistentLock(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink behavior depends on Windows privileges")
+	}
+	configPath, workspace := setupTerraformProject(t)
+	target := filepath.Join(t.TempDir(), "lock")
+	if err := os.WriteFile(target, []byte("lock\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, workspace.LockFile); err != nil {
+		t.Fatal(err)
+	}
+
+	called := false
+	_, err := Plan(context.Background(), validOptions(configPath, runnerFunc(func(context.Context, Command) (int, error) {
+		called = true
+		return 0, nil
+	})))
+	if err == nil || !strings.Contains(err.Error(), "regular file") {
+		t.Fatalf("expected symlink lock rejection, got %v", err)
+	}
+	if called {
+		t.Fatal("runner called with symlinked dependency lock")
+	}
+}
+
 func TestPlanRejectsMissingManagedRender(t *testing.T) {
 	root := t.TempDir()
 	configPath := filepath.Join(root, "bareplane.yaml")
+	writeProvisioningConfig(t, configPath)
 	workspace, err := project.EnsureTerraformWorkspace(configPath)
 	if err != nil {
 		t.Fatal(err)
@@ -179,6 +206,23 @@ func TestPlanPropagatesInitExitWithoutSecrets(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), secret) {
 		t.Fatalf("secret leaked into error: %v", err)
+	}
+}
+
+func TestPlanRejectsTerraformPlanFailure(t *testing.T) {
+	configPath, _ := setupTerraformProject(t)
+	runner := runnerFunc(func(_ context.Context, command Command) (int, error) {
+		if command.Args[0] == "init" {
+			if err := os.WriteFile(filepath.Join(command.Dir, ".terraform.lock.hcl"), []byte("lock\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			return 0, nil
+		}
+		return 1, nil
+	})
+	_, err := Plan(context.Background(), validOptions(configPath, runner))
+	if err == nil || !strings.Contains(err.Error(), "terraform plan exited with code 1") {
+		t.Fatalf("expected plan failure, got %v", err)
 	}
 }
 
@@ -232,6 +276,7 @@ func setupTerraformProject(t *testing.T) (string, project.TerraformWorkspace) {
 	t.Helper()
 	root := t.TempDir()
 	configPath := filepath.Join(root, "bareplane.yaml")
+	writeProvisioningConfig(t, configPath)
 	workspace, err := project.EnsureTerraformWorkspace(configPath)
 	if err != nil {
 		t.Fatal(err)
@@ -242,6 +287,48 @@ func setupTerraformProject(t *testing.T) (string, project.TerraformWorkspace) {
 		t.Fatal(err)
 	}
 	return configPath, workspace
+}
+
+func writeProvisioningConfig(t *testing.T, path string) {
+	t.Helper()
+	input := `apiVersion: bareplane.io/v1alpha1
+kind: BareplaneCluster
+metadata:
+  name: test
+spec:
+  domain: test.example.com
+  provider:
+    type: proxmox
+    endpoint: https://proxmox.example.com:8006
+    targets:
+      - pve1
+    proxmox:
+      bridge: vmbr0
+      systemDatastore: local-lvm
+      cloudImageFileID: local:import/debian.qcow2
+      ssh:
+        user: debian
+        publicKeyFile: id_ed25519.pub
+  nodes:
+    - name: control
+      role: control-plane
+      count: 1
+      cpu: 4
+      memoryGB: 8
+      diskGB: 64
+  features:
+    observability: true
+    gpu: false
+  profiles:
+    - minimal
+  dns:
+    provider: manual
+  secrets:
+    provider: sops
+`
+	if err := os.WriteFile(path, []byte(input), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func validOptions(configPath string, runner Runner) PlanOptions {
