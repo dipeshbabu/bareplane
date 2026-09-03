@@ -1,6 +1,7 @@
 package bootstrapcheck
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -18,10 +19,10 @@ import (
 )
 
 const (
-	DefaultTimeout  = 5 * time.Second
-	MaxBannerBytes  = 255
-	sshProtocol2    = "SSH-2.0-"
-	sshProtocol199  = "SSH-1.99-"
+	DefaultTimeout = 5 * time.Second
+	MaxBannerBytes = 255
+	sshProtocol2   = "SSH-2.0-"
+	sshProtocol199 = "SSH-1.99-"
 )
 
 type Conn interface {
@@ -108,13 +109,14 @@ func probeMachine(ctx context.Context, dial DialFunc, name, host string, port in
 	address := net.JoinHostPort(host, strconv.Itoa(port))
 	probeCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	deadline, _ := probeCtx.Deadline()
 
 	conn, err := dial(probeCtx, "tcp", address)
 	if err != nil {
 		return doctor.Result{Name: name, Status: doctor.StatusFail, Message: "SSH service is unreachable"}
 	}
 	defer conn.Close()
-	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+	if err := conn.SetReadDeadline(deadline); err != nil {
 		return doctor.Result{Name: name, Status: doctor.StatusFail, Message: "could not set SSH banner read deadline"}
 	}
 	if err := readSSHBanner(conn); err != nil {
@@ -124,18 +126,21 @@ func probeMachine(ctx context.Context, dial DialFunc, name, host string, port in
 }
 
 func readSSHBanner(reader io.Reader) error {
-	buffer := make([]byte, 0, MaxBannerBytes)
-	one := []byte{0}
-	for len(buffer) < MaxBannerBytes {
-		n, err := reader.Read(one)
+	var banner [MaxBannerBytes]byte
+	length := 0
+	for length < len(banner) {
+		n, err := reader.Read(banner[length : length+1])
 		if n > 0 {
-			buffer = append(buffer, one[0])
-			if one[0] == '\n' {
-				if len(buffer) < 2 || buffer[len(buffer)-2] != '\r' {
+			length += n
+			if banner[length-1] == '\n' {
+				if length < 2 || banner[length-2] != '\r' {
 					return errors.New("SSH identification line must end with CRLF")
 				}
-				line := string(buffer[:len(buffer)-2])
-				if strings.HasPrefix(line, sshProtocol2) || strings.HasPrefix(line, sshProtocol199) {
+				line := banner[:length-2]
+				if bytes.IndexByte(line, '\r') >= 0 {
+					return errors.New("SSH identification line contains an unexpected carriage return")
+				}
+				if bytes.HasPrefix(line, []byte(sshProtocol2)) || bytes.HasPrefix(line, []byte(sshProtocol199)) {
 					return nil
 				}
 				return errors.New("unsupported SSH identification")

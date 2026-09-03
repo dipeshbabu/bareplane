@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -17,20 +18,27 @@ import (
 )
 
 type fakeConn struct {
-	reader      *bytes.Reader
+	reader      io.Reader
 	deadlineErr error
+	deadline    time.Time
 	closed      bool
 }
 
 func (c *fakeConn) Read(p []byte) (int, error) { return c.reader.Read(p) }
 func (c *fakeConn) Close() error               { c.closed = true; return nil }
-func (c *fakeConn) SetReadDeadline(time.Time) error {
+func (c *fakeConn) SetReadDeadline(deadline time.Time) error {
+	c.deadline = deadline
 	return c.deadlineErr
 }
+
+type failingReader struct{ err error }
+
+func (r failingReader) Read([]byte) (int, error) { return 0, r.err }
 
 func TestCheckProbesMachinesInDeterministicOrder(t *testing.T) {
 	configPath := writeCheckConfig(t, 0)
 	var addresses []string
+	var connections []*fakeConn
 	report := Check(context.Background(), Options{
 		ConfigPath: configPath,
 		Dial: func(_ context.Context, network, address string) (Conn, error) {
@@ -38,7 +46,9 @@ func TestCheckProbesMachinesInDeterministicOrder(t *testing.T) {
 				t.Fatalf("network = %q", network)
 			}
 			addresses = append(addresses, address)
-			return &fakeConn{reader: bytes.NewReader([]byte("SSH-2.0-OpenSSH_9.6\r\n"))}, nil
+			conn := &fakeConn{reader: bytes.NewReader([]byte("SSH-2.0-OpenSSH_9.6\r\n"))}
+			connections = append(connections, conn)
+			return conn, nil
 		},
 	})
 	if report.HasFailures() {
@@ -52,6 +62,14 @@ func TestCheckProbesMachinesInDeterministicOrder(t *testing.T) {
 	for i, result := range report.Results {
 		if result.Name != wantNames[i] || result.Status != doctor.StatusPass {
 			t.Fatalf("result[%d] = %#v", i, result)
+		}
+	}
+	for i, conn := range connections {
+		if !conn.closed {
+			t.Fatalf("connection %d was not closed", i)
+		}
+		if conn.deadline.IsZero() {
+			t.Fatalf("connection %d did not receive a read deadline", i)
 		}
 	}
 }
@@ -72,6 +90,34 @@ func TestCheckUsesCustomPort(t *testing.T) {
 	for _, address := range addresses {
 		if !strings.HasSuffix(address, ":2222") {
 			t.Fatalf("custom port not used: %q", address)
+		}
+	}
+}
+
+func TestCheckUsesOneDeadlineForDialAndBannerRead(t *testing.T) {
+	configPath := writeCheckConfig(t, 0)
+	var dialDeadlines []time.Time
+	var connections []*fakeConn
+	report := Check(context.Background(), Options{
+		ConfigPath: configPath,
+		Timeout:    time.Second,
+		Dial: func(ctx context.Context, _, _ string) (Conn, error) {
+			deadline, ok := ctx.Deadline()
+			if !ok {
+				t.Fatal("dial context has no deadline")
+			}
+			dialDeadlines = append(dialDeadlines, deadline)
+			conn := &fakeConn{reader: bytes.NewReader([]byte("SSH-2.0-test\r\n"))}
+			connections = append(connections, conn)
+			return conn, nil
+		},
+	})
+	if report.HasFailures() {
+		t.Fatalf("unexpected failures: %#v", report.Results)
+	}
+	for i, conn := range connections {
+		if !conn.deadline.Equal(dialDeadlines[i]) {
+			t.Fatalf("connection %d read deadline %v differs from dial deadline %v", i, conn.deadline, dialDeadlines[i])
 		}
 	}
 }
@@ -99,8 +145,10 @@ func TestCheckReportsConnectionFailureWithoutDetails(t *testing.T) {
 
 func TestReadSSHBannerRejectsInvalidResponses(t *testing.T) {
 	cases := map[string]string{
+		"empty":       "",
 		"non ssh":     "HTTP/1.1 200 OK\r\n",
 		"lf only":     "SSH-2.0-test\n",
+		"extra cr":    "SSH-2.0-test\r\r\n",
 		"truncated":   "SSH-2.0-test",
 		"oversized":   strings.Repeat("A", MaxBannerBytes),
 		"unsupported": "SSH-1.5-old\r\n",
@@ -114,17 +162,61 @@ func TestReadSSHBannerRejectsInvalidResponses(t *testing.T) {
 	}
 }
 
-func TestCheckReportsReadDeadlineFailure(t *testing.T) {
+func TestReadSSHBannerAcceptsMaximumLengthIdentification(t *testing.T) {
+	banner := "SSH-2.0-" + strings.Repeat("A", MaxBannerBytes-len("SSH-2.0-\r\n")) + "\r\n"
+	if len(banner) != MaxBannerBytes {
+		t.Fatalf("test banner length = %d", len(banner))
+	}
+	if err := readSSHBanner(strings.NewReader(banner)); err != nil {
+		t.Fatalf("maximum-length identification rejected: %v", err)
+	}
+}
+
+func TestCheckReportsBannerReadFailureWithoutDetails(t *testing.T) {
 	configPath := writeCheckConfig(t, 0)
+	var connections []*fakeConn
 	report := Check(context.Background(), Options{
 		ConfigPath: configPath,
 		Dial: func(context.Context, string, string) (Conn, error) {
-			return &fakeConn{reader: bytes.NewReader([]byte("SSH-2.0-test\r\n")), deadlineErr: errors.New("deadline")}, nil
+			conn := &fakeConn{reader: failingReader{err: errors.New("secret read detail")}}
+			connections = append(connections, conn)
+			return conn, nil
+		},
+	})
+	for _, result := range report.Results {
+		if result.Status != doctor.StatusFail || result.Message != "reachable endpoint did not present a valid SSH identification line" {
+			t.Fatalf("unexpected result: %#v", result)
+		}
+		if strings.Contains(result.Message, "secret read detail") {
+			t.Fatal("read error detail leaked")
+		}
+	}
+	for i, conn := range connections {
+		if !conn.closed {
+			t.Fatalf("connection %d was not closed after a read failure", i)
+		}
+	}
+}
+
+func TestCheckReportsReadDeadlineFailure(t *testing.T) {
+	configPath := writeCheckConfig(t, 0)
+	var connections []*fakeConn
+	report := Check(context.Background(), Options{
+		ConfigPath: configPath,
+		Dial: func(context.Context, string, string) (Conn, error) {
+			conn := &fakeConn{reader: bytes.NewReader([]byte("SSH-2.0-test\r\n")), deadlineErr: errors.New("deadline")}
+			connections = append(connections, conn)
+			return conn, nil
 		},
 	})
 	for _, result := range report.Results {
 		if result.Status != doctor.StatusFail || result.Message != "could not set SSH banner read deadline" {
 			t.Fatalf("unexpected result: %#v", result)
+		}
+	}
+	for i, conn := range connections {
+		if !conn.closed {
+			t.Fatalf("connection %d was not closed after a deadline failure", i)
 		}
 	}
 }
