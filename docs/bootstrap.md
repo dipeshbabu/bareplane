@@ -132,6 +132,16 @@ bareplane bootstrap trust --rotate clusters/dev/bareplane.yaml
 
 Bareplane refuses an unmanaged, modified, oversized, broadly permissioned, non-regular, or symlinked trust file and refuses symlinks in its state-directory boundary. If trust state is damaged, stop any authenticated bootstrap operation, inspect `.bareplane/state/bootstrap/known_hosts`, verify current fingerprints out of band, remove or relocate the invalid file manually, and run `bootstrap trust` again. Bareplane never silently repairs or adopts unknown trust data.
 
+## Authenticated remote preflight
+
+After approving host identity, authenticate and run the read-only host suitability gate:
+
+```bash
+bareplane bootstrap preflight
+```
+
+This command requires the complete Kubernetes bootstrap contract, the configured private-key file, and the integrity-checked project known_hosts file. It verifies public-key authentication, non-interactive sudo, supported Linux and architecture versions, kernel and resources, networking, swap, time synchronization, existing container/Kubernetes state, and GPU intent. See [bootstrap-preflight.md](bootstrap-preflight.md) for the complete check, security, and support contract.
+
 ## Secret boundary
 
 `privateKeyFile` is a local path reference. Configuration validation and inventory rendering do not read the file. The path and private-key contents are deliberately omitted from `inventory.yaml` and are not used by the SSH service check.
@@ -142,4 +152,4 @@ Future execution code must keep private-key contents out of logs, generated inve
 
 ## Current limitation
 
-Bareplane can validate bootstrap connectivity, render the inventory, verify local readiness, confirm that configured endpoints expose an SSH service, and persist explicitly approved host identities. It does not yet authenticate over SSH or run Kubernetes bootstrap. Those execution capabilities remain separate changes so connectivity and mutation boundaries stay reviewable.
+Bareplane can validate bootstrap connectivity, render the inventory, verify local readiness, confirm that configured endpoints expose an SSH service, persist explicitly approved host identities, and authenticate for read-only remote readiness checks. It does not yet mutate hosts or run Kubernetes bootstrap. Those execution capabilities remain separate changes so connectivity and mutation boundaries stay reviewable.

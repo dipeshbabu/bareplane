@@ -12,6 +12,7 @@ import (
 
 	"github.com/dipeshbabu/bareplane/internal/bootstrapcheck"
 	"github.com/dipeshbabu/bareplane/internal/bootstrapdoctor"
+	"github.com/dipeshbabu/bareplane/internal/bootstrappreflight"
 	"github.com/dipeshbabu/bareplane/internal/config"
 	"github.com/dipeshbabu/bareplane/internal/project"
 	ansiblerender "github.com/dipeshbabu/bareplane/internal/render/ansible"
@@ -22,12 +23,14 @@ const bootstrapUsage = `Usage:
   bareplane bootstrap doctor [path]
   bareplane bootstrap check [path]
   bareplane bootstrap trust [--rotate] [path]
+  bareplane bootstrap preflight [path]
 
 Commands:
   render     Render deterministic Ansible inventory without connecting to hosts
   doctor     Check local bootstrap inventory, SSH key, and tooling readiness
   check      Check remote TCP reachability and SSH service identification only
   trust      Review and explicitly trust remote SSH host identities
+  preflight  Authenticate and verify read-only remote host readiness
 `
 
 func runBootstrap(args []string, stdout, stderr io.Writer) int {
@@ -47,10 +50,35 @@ func runBootstrap(args []string, stdout, stderr io.Writer) int {
 		return runBootstrapCheck(args[1:], stdout, stderr)
 	case "trust":
 		return runBootstrapTrust(args[1:], os.Stdin, stdout, stderr)
+	case "preflight":
+		return runBootstrapPreflight(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown bootstrap command %q\n\n%s", args[0], bootstrapUsage)
 		return 2
 	}
+}
+
+func runBootstrapPreflight(args []string, stdout, stderr io.Writer, runners ...bootstrappreflight.Runner) int {
+	if len(args) > 1 {
+		fmt.Fprintln(stderr, "usage: bareplane bootstrap preflight [path]")
+		return 2
+	}
+	configPath := "bareplane.yaml"
+	if len(args) == 1 {
+		configPath = args[0]
+	}
+	var runner bootstrappreflight.Runner
+	if len(runners) > 0 {
+		runner = runners[0]
+	}
+	report := bootstrappreflight.Inspect(context.Background(), bootstrappreflight.Options{ConfigPath: configPath, Runner: runner})
+	for _, result := range report.Results {
+		fmt.Fprintf(stdout, "%-4s  %-28s %s\n", strings.ToUpper(string(result.Status)), result.Name, result.Message)
+	}
+	if report.HasFailures() {
+		return 1
+	}
+	return 0
 }
 
 func runBootstrapCheck(args []string, stdout, stderr io.Writer) int {
