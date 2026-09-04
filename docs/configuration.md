@@ -97,6 +97,28 @@ Bareplane deliberately does not model Proxmox API token values, SSH private keys
 
 The base `Validate()` path allows this block to be absent so read-only workflows remain usable. Infrastructure renderers call the stronger `ValidateProvisioning()` contract, which additionally requires at least one provider target and every Proxmox provisioning field.
 
+## Kubernetes bootstrap settings
+
+The optional `spec.kubernetes` block pins the Kubernetes control-plane, virtual-IP, and CNI inputs used by later bootstrap phases:
+
+```yaml
+spec:
+  kubernetes:
+    version: 1.36.4
+    apiVIP: 192.168.1.100
+    podCIDR: 10.244.0.0/16
+    serviceCIDR: 10.96.0.0/12
+    kubeVIPVersion: 1.2.3
+    ciliumVersion: 1.20.1
+    kubeProxyReplacement: true
+```
+
+Versions are exact `MAJOR.MINOR.PATCH` values rather than floating channels or image tags. CIDRs must be canonical, non-overlapping, and use one address family. The API VIP must be a unicast IP address outside both cluster CIDRs.
+
+The base `Validate()` path permits the entire block to be absent so infrastructure-only configurations remain valid. Kubernetes workflows use the stronger `ValidateKubernetesBootstrap()` contract, which requires complete SSH and Kubernetes settings, at least one control-plane machine, and Cilium kube-proxy replacement.
+
+See [kubernetes.md](kubernetes.md) for the supported v0.1 compatibility matrix, ownership decisions, and topology contract.
+
 ## Validate
 
 ```bash

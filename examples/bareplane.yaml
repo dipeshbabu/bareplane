@@ -44,6 +44,14 @@ spec:
         homelab-control-plane-3: 192.168.1.103
         homelab-gpu-workers-1: 192.168.1.111
         homelab-gpu-workers-2: 192.168.1.112
+  kubernetes:
+    version: 1.36.4
+    apiVIP: 192.168.1.100
+    podCIDR: 10.244.0.0/16
+    serviceCIDR: 10.96.0.0/12
+    kubeVIPVersion: 1.2.3
+    ciliumVersion: 1.20.1
+    kubeProxyReplacement: true
   features:
     observability: true
     gpu: true

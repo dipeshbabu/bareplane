@@ -35,6 +35,8 @@ The host-map keys are deterministic Bareplane machine names. They must exactly m
 - a valid SSH port, with 22 used when omitted;
 - host values that are IPv4 addresses, IPv6 addresses, or DNS hostnames without schemes, paths, user information, whitespace, or embedded ports.
 
+`Config.ValidateKubernetesBootstrap()` builds on this SSH contract and additionally requires the complete versioned Kubernetes settings, compatible pinned component versions, safe non-overlapping network ranges, at least one control-plane machine, and the v0.1 Cilium kube-proxy replacement mode. See [kubernetes.md](kubernetes.md) for that contract.
+
 ## Render the inventory
 
 Once the bootstrap configuration is complete:
