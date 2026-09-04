@@ -34,10 +34,14 @@ go run ./cmd/bareplane plan
 go run ./cmd/bareplane render
 go run ./cmd/bareplane terraform plan
 go run ./cmd/bareplane terraform apply --approve <cluster-name>
+go run ./cmd/bareplane bootstrap render
+go run ./cmd/bareplane bootstrap doctor
+go run ./cmd/bareplane bootstrap check
+go run ./cmd/bareplane bootstrap trust
 go run ./cmd/bareplane version
 ```
 
-`init` creates a safe starter configuration without overwriting existing files. `validate` checks the strict configuration contract. `doctor` verifies local tooling, provider configuration, credentials, and Proxmox reachability. `plan` directly discovers Proxmox guests and prints Bareplane's ownership-aware desired-versus-observed plan without Terraform. `render` produces deterministic Terraform in `.bareplane/terraform`. `terraform plan` uses that generated configuration and the persistent `.bareplane/state/terraform` workspace to create a real provider-backed saved plan plus a SHA-256 attestation. `terraform apply` accepts only that attested saved plan, requires exact cluster-name approval, and invalidates the attestation before mutation begins.
+`init` creates a safe starter configuration without overwriting existing files. `validate` checks the strict configuration contract. `doctor` verifies local tooling, provider configuration, credentials, and Proxmox reachability. `plan` directly discovers Proxmox guests and prints Bareplane's ownership-aware desired-versus-observed plan without Terraform. `render` produces deterministic Terraform in `.bareplane/terraform`. `terraform plan` uses that generated configuration and the persistent `.bareplane/state/terraform` workspace to create a real provider-backed saved plan plus a SHA-256 attestation. `terraform apply` accepts only that attested saved plan, requires exact cluster-name approval, and invalidates the attestation before mutation begins. Bootstrap commands render deterministic Ansible inventory, verify local and remote readiness, and persist only explicitly approved SSH host identities.
 
 See [docs/configuration.md](docs/configuration.md), [docs/doctor.md](docs/doctor.md), [docs/topology.md](docs/topology.md), [docs/ownership.md](docs/ownership.md), [docs/proxmox.md](docs/proxmox.md), [docs/plan.md](docs/plan.md), [docs/render.md](docs/render.md), [docs/bootstrap.md](docs/bootstrap.md), [docs/kubernetes.md](docs/kubernetes.md), [docs/terraform-workspace.md](docs/terraform-workspace.md), [docs/terraform-plan.md](docs/terraform-plan.md), and [docs/terraform-apply.md](docs/terraform-apply.md) for the current contracts.
 

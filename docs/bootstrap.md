@@ -74,6 +74,7 @@ This is a local-only readiness check. It verifies:
 - the configured SSH private key exists as a regular, non-symlink file;
 - on POSIX systems, the private key is not group- or world-readable;
 - `ssh` is installed;
+- `ssh-keyscan` is installed;
 - `ansible-playbook` is installed.
 
 The command does not read or print private-key contents, contact any configured host, invoke SSH, run Ansible, call Proxmox, or mutate the project.
@@ -97,6 +98,40 @@ Bareplane sends no private key, password, API token, SSH authentication packet, 
 
 A PASS proves only that the configured endpoint is reachable and presents an SSH service. It does **not** verify the server host key, machine identity, SSH authentication, authorization, Python availability, sudo access, or Ansible compatibility.
 
+## SSH host identity trust
+
+After reachability passes, discover and review every endpoint's public SSH host keys:
+
+```bash
+bareplane bootstrap trust
+```
+
+Bareplane runs timeout-bounded, output-capped `ssh-keyscan` discovery without authenticating. Results are sorted by machine name and key type and display only the machine, endpoint, public-key type, and SHA-256 fingerprint. Bareplane does not open the configured private key, send credentials, start an SSH session, or run a remote command.
+
+Compare the displayed fingerprints with a trusted out-of-band source such as the machine console or provisioning records. To persist the reviewed keys, type the exact `metadata.name` value at the prompt. Any other input exits without creating or changing trust state.
+
+Approved keys are written to:
+
+```text
+.bareplane/state/bootstrap/known_hosts
+```
+
+This persistent path is separate from the replaceable `.bareplane/bootstrap` render. The file uses OpenSSH known_hosts syntax, formats non-default ports as `[host]:port`, carries a versioned Bareplane management checksum, and is owner-only on POSIX systems. Future authenticated SSH and Ansible operations must use this file with strict host-key checking; bypass modes such as `StrictHostKeyChecking=no` are not supported.
+
+Re-running `bootstrap trust` with the same key set is idempotent and does not prompt or rewrite the file. A changed, added, or removed key is reported and refused. After independently verifying an intentional host replacement or key rotation, use the explicit rotation flow:
+
+```bash
+bareplane bootstrap trust --rotate
+```
+
+The rotation command shows old and new fingerprints and again requires the exact cluster name before replacing the complete trusted key set. The same rules apply when a custom configuration path is supplied:
+
+```bash
+bareplane bootstrap trust --rotate clusters/dev/bareplane.yaml
+```
+
+Bareplane refuses an unmanaged, modified, oversized, broadly permissioned, non-regular, or symlinked trust file and refuses symlinks in its state-directory boundary. If trust state is damaged, stop any authenticated bootstrap operation, inspect `.bareplane/state/bootstrap/known_hosts`, verify current fingerprints out of band, remove or relocate the invalid file manually, and run `bootstrap trust` again. Bareplane never silently repairs or adopts unknown trust data.
+
 ## Secret boundary
 
 `privateKeyFile` is a local path reference. Configuration validation and inventory rendering do not read the file. The path and private-key contents are deliberately omitted from `inventory.yaml` and are not used by the SSH service check.
@@ -107,4 +142,4 @@ Future execution code must keep private-key contents out of logs, generated inve
 
 ## Current limitation
 
-Bareplane can validate bootstrap connectivity, render the inventory, verify local readiness, and confirm that configured endpoints expose an SSH service. It does not yet authenticate over SSH or run Kubernetes bootstrap. Those execution capabilities remain separate changes so connectivity and mutation boundaries stay reviewable.
+Bareplane can validate bootstrap connectivity, render the inventory, verify local readiness, confirm that configured endpoints expose an SSH service, and persist explicitly approved host identities. It does not yet authenticate over SSH or run Kubernetes bootstrap. Those execution capabilities remain separate changes so connectivity and mutation boundaries stay reviewable.

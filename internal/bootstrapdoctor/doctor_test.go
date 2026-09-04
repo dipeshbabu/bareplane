@@ -22,8 +22,8 @@ func TestInspectReadyProjectPassesAllChecks(t *testing.T) {
 	if report.HasFailures() {
 		t.Fatalf("unexpected failures: %#v", report.Results)
 	}
-	if len(report.Results) != 5 {
-		t.Fatalf("expected 5 checks, got %d", len(report.Results))
+	if len(report.Results) != 6 {
+		t.Fatalf("expected 6 checks, got %d", len(report.Results))
 	}
 }
 
@@ -38,18 +38,22 @@ func TestInspectMissingInventoryFails(t *testing.T) {
 }
 
 func TestInspectMissingToolFails(t *testing.T) {
-	configPath, keyPath := setupReadyProject(t)
-	report := Inspect(Options{
-		ConfigPath: configPath,
-		LookPath: func(name string) (string, error) {
-			if name == "ansible-playbook" {
-				return "", errors.New("not found")
-			}
-			return "/usr/bin/" + name, nil
-		},
-		UserHomeDir: func() (string, error) { return filepath.Dir(filepath.Dir(keyPath)), nil },
-	})
-	assertFailed(t, report, "ansible-playbook")
+	for _, missing := range []string{"ssh", "ssh-keyscan", "ansible-playbook"} {
+		t.Run(missing, func(t *testing.T) {
+			configPath, keyPath := setupReadyProject(t)
+			report := Inspect(Options{
+				ConfigPath: configPath,
+				LookPath: func(name string) (string, error) {
+					if name == missing {
+						return "", errors.New("not found")
+					}
+					return "/usr/bin/" + name, nil
+				},
+				UserHomeDir: func() (string, error) { return filepath.Dir(filepath.Dir(keyPath)), nil },
+			})
+			assertFailed(t, report, missing)
+		})
+	}
 }
 
 func TestInspectRejectsSymlinkedPrivateKey(t *testing.T) {
