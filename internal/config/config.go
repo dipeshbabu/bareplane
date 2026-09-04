@@ -28,14 +28,15 @@ type Metadata struct {
 }
 
 type Spec struct {
-	Domain    string           `yaml:"domain"`
-	Provider  Provider         `yaml:"provider"`
-	Nodes     []NodeGroup      `yaml:"nodes"`
-	Bootstrap *BootstrapConfig `yaml:"bootstrap,omitempty"`
-	Features  Features         `yaml:"features"`
-	Profiles  []string         `yaml:"profiles"`
-	DNS       DNS              `yaml:"dns"`
-	Secrets   Secrets          `yaml:"secrets"`
+	Domain     string            `yaml:"domain"`
+	Provider   Provider          `yaml:"provider"`
+	Nodes      []NodeGroup       `yaml:"nodes"`
+	Bootstrap  *BootstrapConfig  `yaml:"bootstrap,omitempty"`
+	Kubernetes *KubernetesConfig `yaml:"kubernetes,omitempty"`
+	Features   Features          `yaml:"features"`
+	Profiles   []string          `yaml:"profiles"`
+	DNS        DNS               `yaml:"dns"`
+	Secrets    Secrets           `yaml:"secrets"`
 }
 
 type Provider struct {
@@ -151,6 +152,7 @@ func (c Config) Validate() error {
 
 	problems = append(problems, validateOptionalProxmoxProvisioning(c.Spec.Provider.Proxmox)...)
 	problems = append(problems, validateOptionalBootstrap(c.Spec.Bootstrap)...)
+	problems = append(problems, validateOptionalKubernetes(c.Spec.Kubernetes)...)
 
 	if len(c.Spec.Nodes) == 0 {
 		problems = append(problems, "spec.nodes must contain at least one node group")
