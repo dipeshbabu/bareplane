@@ -21,11 +21,13 @@ const bootstrapUsage = `Usage:
   bareplane bootstrap render [path]
   bareplane bootstrap doctor [path]
   bareplane bootstrap check [path]
+  bareplane bootstrap trust [--rotate] [path]
 
 Commands:
   render     Render deterministic Ansible inventory without connecting to hosts
   doctor     Check local bootstrap inventory, SSH key, and tooling readiness
   check      Check remote TCP reachability and SSH service identification only
+  trust      Review and explicitly trust remote SSH host identities
 `
 
 func runBootstrap(args []string, stdout, stderr io.Writer) int {
@@ -43,6 +45,8 @@ func runBootstrap(args []string, stdout, stderr io.Writer) int {
 		return runBootstrapDoctor(args[1:], stdout, stderr, exec.LookPath, os.UserHomeDir)
 	case "check":
 		return runBootstrapCheck(args[1:], stdout, stderr)
+	case "trust":
+		return runBootstrapTrust(args[1:], os.Stdin, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown bootstrap command %q\n\n%s", args[0], bootstrapUsage)
 		return 2

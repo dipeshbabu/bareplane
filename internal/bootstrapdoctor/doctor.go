@@ -44,6 +44,7 @@ func Inspect(options Options) doctor.Report {
 		inventoryResult(options.ConfigPath),
 		privateKeyResult(options.ConfigPath, cfg.Spec.Bootstrap.SSH.PrivateKeyFile, options.UserHomeDir),
 		toolResult("ssh", options.LookPath),
+		toolResult("ssh-keyscan", options.LookPath),
 		toolResult("ansible-playbook", options.LookPath),
 	)
 	return doctor.Report{Results: results}
