@@ -6,7 +6,7 @@ import struct
 import unittest
 from unittest.mock import patch
 
-source = Path(__file__).resolve().parents[2] / 'internal/render/ansible/assets/roles/api_vip/library/bareplane_vip_probe.py'
+source = Path(__file__).resolve().parents[2] / 'internal/render/ansible/assets/library/bareplane_vip_probe.py'
 spec = importlib.util.spec_from_file_location('vip_probe', source)
 vip = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(vip)

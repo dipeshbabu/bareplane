@@ -16,7 +16,9 @@ Ansible controller execution targets Linux/WSL, with OpenSSH installed.
 
 site.yaml defines the phase order. host_prepare installs pinned containerd and
 prepares Linux; kubernetes_install adds pinned Kubernetes binaries; api_vip
-checks LAN address conflicts and installs the static Pod manifest. Other phase roles stop with a specific error until their issues
+checks LAN address conflicts and installs the static Pod manifest;
+control_plane_init initializes the primary with private, configuration-bound state.
+Other phase roles stop with a specific error until their issues
 are implemented (including in check mode).
 This bundle alone does not yet create Kubernetes. Do not interpret a successful
 syntax check or contract preview as a successful host/bootstrap operation.

@@ -2,6 +2,7 @@
 - name: control_plane_init
   hosts: "control_plane[0]"
   gather_facts: false
+  become: true
   any_errors_fatal: true
   roles:
     - role: contract

@@ -90,7 +90,7 @@ ansible-playbook --syntax-check site.yaml
 ansible-playbook validate.yaml
 ```
 
-The second command previews the contract entirely on the controller. `site.yaml` orders host preparation, package installation, API VIP, primary control plane, Cilium, joins, kubeconfig, and health. Host preparation, Kubernetes packages, and the VIP manifest phase are implemented; subsequent phases stop with explicit issue-specific errors until issues #61–#65 implement them. Syntax validation and contract preview do not indicate a bootstrapped cluster.
+The second command previews the contract entirely on the controller. `site.yaml` orders host preparation, package installation, API VIP, primary control plane, Cilium, joins, kubeconfig, and health. Preparation through primary control-plane initialization is implemented; subsequent phases stop with explicit issue-specific errors until issues #62–#65 implement them. Syntax validation and contract preview do not indicate a bootstrapped cluster.
 
 ## Kubernetes packages
 
@@ -121,6 +121,16 @@ Before writing anything, the role validates existing manifest ownership and prob
 The role writes an owner-only `/etc/kubernetes/manifests/kube-vip.yaml` with the pinned kube-vip version, host networking, control-plane leader election, and only NET_ADMIN/NET_RAW capabilities. It does not enable Kubernetes Service load balancing. Reapplication requires byte-identical managed content and is idempotent; unmanaged or edited files require explicit recovery.
 
 The primary initially mounts `super-admin.conf`, which kubeadm creates during initialization. After a successful initialization, the control-plane phase must switch it to `admin.conf` and write the cluster-specific `.bareplane-init-complete` marker. Other control planes use `admin.conf`. The VIP role creates neither credentials nor cluster state and performs no kubeadm init/join. VM CI checks an occupied VIP using an isolated network namespace, manifest refusal, interface selection, and an unchanged second application.
+
+## Primary control-plane initialization
+
+`control_plane_init.yaml` acts only on the deterministic primary. It renders kubeadm v1beta4 configuration with the stable VIP endpoint, the observed node IP, desired pod/service CIDRs, stacked etcd, systemd cgroups, and kube-proxy replacement. It requires the matching VIP manifest and exact kubeadm binary version.
+
+Before mutation it checks for ambiguous Kubernetes/etcd state, redirected paths, and earlier initialization attempts. The configuration and a SHA-256 intent record are stored under `/var/lib/bareplane/bootstrap` with private permissions. A recorded but incomplete attempt is never retried or reset automatically. Inspect that state and use explicit recovery after a failed attempt; deleting markers without understanding the host state is not a recovery workflow.
+
+Kubeadm output is capped and written directly to an owner-only file in that private state directory. It may contain join tokens and uploaded-certificate keys, so it must not be logged or copied into generated inventory. Initialization has a 15-minute limit and skips kube-proxy. API readiness through the VIP gates the credential handoff from `super-admin.conf` to `admin.conf`; only then is `.bareplane-init-complete` written. Reapplication verifies the marker and configuration digest and never reinitializes a completed cluster.
+
+Cilium remains a later phase. A working primary API and etcd do not yet imply a Ready Kubernetes node or working pod networking.
 
 ## Local bootstrap doctor
 

@@ -19,6 +19,12 @@ spec:
           value: "true"
         - name: vip_interface
           value: {{ bareplane_vip_facts.interface | to_json }}
+        - name: vip_nodename
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: kubernetes_addr
+          value: {{ ('https://' ~ bareplane_vip_facts.node_address ~ ':' ~ bareplane_api_port) | to_json }}
         - name: vip_subnet
           value: "32"
         - name: port

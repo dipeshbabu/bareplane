@@ -1,5 +1,6 @@
 ---
-- name: Refuse the unavailable control_plane_init phase
-  ansible.builtin.fail:
-    msg: "Bootstrap phase control_plane_init is not implemented; see Bareplane issue #61."
-  tags: [always]
+- name: Inspect primary identity and initialization state
+  ansible.builtin.import_tasks: inspect.yaml
+
+- name: Initialize the primary control plane
+  ansible.builtin.import_tasks: initialize.yaml

@@ -1,5 +1,5 @@
 #!/usr/bin/python
-"""Read-only IPv4 VIP interface discovery and bounded ARP conflict checks."""
+"""Shared read-only IPv4 interface discovery and bounded ARP conflict checks."""
 import ipaddress
 import json
 import socket

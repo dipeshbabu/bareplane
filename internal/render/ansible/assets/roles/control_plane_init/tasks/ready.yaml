@@ -1,0 +1,10 @@
+---
+- name: Wait for the primary API and stacked etcd through the VIP
+  ansible.builtin.command: kubectl --kubeconfig /etc/kubernetes/admin.conf --request-timeout=5s get --raw=/readyz
+  changed_when: false
+  no_log: true
+  register: bareplane_primary_ready
+  until: bareplane_primary_ready.rc == 0 and bareplane_primary_ready.stdout == 'ok'
+  retries: 12
+  delay: 5
+  when: not ansible_check_mode
