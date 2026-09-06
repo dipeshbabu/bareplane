@@ -1,0 +1,5 @@
+# Managed by Bareplane kubernetes_install v1.
+Types: deb
+URIs: https://pkgs.k8s.io/core:/stable:/v{{ bareplane_kubernetes_version.split('.')[:2] | join('.') }}/deb/
+Suites: /
+Signed-By: /etc/apt/keyrings/bareplane-kubernetes.asc

@@ -1,0 +1,12 @@
+---
+- name: Reapply Kubernetes packages without changes
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    bareplane_kubernetes_version: '1.36.4'
+  pre_tasks:
+    - name: Require disposable VM context
+      ansible.builtin.assert:
+        that: lookup('ansible.builtin.env', 'BAREPLANE_DISPOSABLE_VM') == '1'
+  roles: [kubernetes_install]

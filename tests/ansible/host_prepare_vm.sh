@@ -18,3 +18,10 @@ if ! ansible-playbook -i localhost, tests/ansible/host_prepare_rerun.yaml > "$wo
 fi
 cat "$workspace/rerun.log"
 grep -Eq 'changed=0 .*unreachable=0 .*failed=0' "$workspace/rerun.log"
+ansible-playbook -i localhost, tests/ansible/kubernetes_toolchain.yaml
+if ! ansible-playbook -i localhost, tests/ansible/kubernetes_toolchain_rerun.yaml > "$workspace/kubernetes-rerun.log" 2>&1; then
+  cat "$workspace/kubernetes-rerun.log"
+  exit 1
+fi
+cat "$workspace/kubernetes-rerun.log"
+grep -Eq 'changed=0 .*unreachable=0 .*failed=0' "$workspace/kubernetes-rerun.log"

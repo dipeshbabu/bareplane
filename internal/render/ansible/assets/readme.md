@@ -15,7 +15,7 @@ set ANSIBLE_CONFIG explicitly, and control environment/extra-variable overrides.
 Ansible controller execution targets Linux/WSL, with OpenSSH installed.
 
 site.yaml defines the phase order. host_prepare installs pinned containerd and
-prepares Linux; other phase roles stop with a specific error until their issues
+prepares Linux; kubernetes_install adds pinned Kubernetes binaries. Other phase roles stop with a specific error until their issues
 are implemented (including in check mode).
 This bundle alone does not yet create Kubernetes. Do not interpret a successful
 syntax check or contract preview as a successful host/bootstrap operation.
