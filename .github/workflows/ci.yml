@@ -80,6 +80,9 @@ jobs:
           BAREPLANE_TEST_ANSIBLE: '1'
         run: go test -count=1 -v ./internal/render/ansible -run TestBundleAnsibleIntegration
 
+      - name: Test VIP interface and conflict detection
+        run: python -m unittest discover -s tests/ansible -p 'test_*.py'
+
       - name: Validate YAML syntax
         run: |
           ruby -e 'require "yaml"; Dir.glob("**/*.{yml,yaml}", File::FNM_DOTMATCH).reject { |f| f.include?("/.git/") }.each { |f| YAML.load_file(f, aliases: true) }'

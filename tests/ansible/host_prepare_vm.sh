@@ -25,3 +25,20 @@ if ! ansible-playbook -i localhost, tests/ansible/kubernetes_toolchain_rerun.yam
 fi
 cat "$workspace/kubernetes-rerun.log"
 grep -Eq 'changed=0 .*unreachable=0 .*failed=0' "$workspace/kubernetes-rerun.log"
+# Create a LAN and an unrelated VIP claimant entirely inside the disposable VM.
+ip netns add bareplane-vip-test
+ip link add bareplane-vip type veth peer name bareplane-peer
+ip link set bareplane-peer netns bareplane-vip-test
+ip address add 192.0.2.10/24 dev bareplane-vip
+ip link set bareplane-vip up
+ip -n bareplane-vip-test address add 192.0.2.100/24 dev bareplane-peer
+ip -n bareplane-vip-test link set bareplane-peer up
+ansible-playbook -i tests/ansible/control_plane.ini tests/ansible/api_vip_refuse.yaml
+ip -n bareplane-vip-test address del 192.0.2.100/24 dev bareplane-peer
+ansible-playbook -i tests/ansible/control_plane.ini tests/ansible/api_vip.yaml
+if ! ansible-playbook -i tests/ansible/control_plane.ini tests/ansible/api_vip.yaml > "$workspace/vip-rerun.log" 2>&1; then
+  cat "$workspace/vip-rerun.log"
+  exit 1
+fi
+cat "$workspace/vip-rerun.log"
+grep -Eq 'changed=0 .*unreachable=0 .*failed=0' "$workspace/vip-rerun.log"

@@ -2,6 +2,7 @@
 - name: api_vip
   hosts: "control_plane"
   gather_facts: false
+  become: true
   any_errors_fatal: true
   roles:
     - role: contract

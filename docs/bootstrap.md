@@ -90,7 +90,7 @@ ansible-playbook --syntax-check site.yaml
 ansible-playbook validate.yaml
 ```
 
-The second command previews the contract entirely on the controller. `site.yaml` orders host preparation, package installation, API VIP, primary control plane, Cilium, joins, kubeconfig, and health. Host preparation and Kubernetes package installation are implemented; subsequent phases stop with explicit issue-specific errors until issues #60–#65 implement them. Syntax validation and contract preview do not indicate a bootstrapped cluster.
+The second command previews the contract entirely on the controller. `site.yaml` orders host preparation, package installation, API VIP, primary control plane, Cilium, joins, kubeconfig, and health. Host preparation, Kubernetes packages, and the VIP manifest phase are implemented; subsequent phases stop with explicit issue-specific errors until issues #61–#65 implement them. Syntax validation and contract preview do not indicate a bootstrapped cluster.
 
 ## Kubernetes packages
 
@@ -111,6 +111,16 @@ The role installs the exact `containerd.io` 2.2.6 package revision 1 for the hos
 Owned files are `/etc/containerd/config.toml`, `/etc/modules-load.d/bareplane.conf`, `/etc/sysctl.d/90-bareplane.conf`, `/etc/apt/keyrings/bareplane-docker.asc`, `/etc/apt/sources.list.d/bareplane-containerd.sources`, and `/etc/apt/preferences.d/bareplane-containerd`. Existing files must exactly match the generated content before the role will proceed. Symlinked paths, custom runtime services, alternative runtime packages, existing Kubernetes/CNI state, and mismatched containerd versions block preparation before any mutation. Inspect and back up conflicting state before manually removing it or choosing an explicit lifecycle recovery path; the role has no force/adoption switch.
 
 The supported hosts are Debian 12/13 and Ubuntu 22.04/24.04/26.04 on amd64/arm64 with systemd and kernel 5.10 or newer. Python 3 with the distribution's `python3-apt` bindings is required. Linux VM CI exercises unmanaged-file refusal, containerd health, and an unchanged second application. Real Proxmox acceptance remains part of the release gate. The role does not install kubeadm, initialize/join Kubernetes, or configure registry mirrors.
+
+## API virtual IP
+
+The `api_vip.yaml` phase derives the interface and node address from live IP address/route facts. The current bootstrap implementation requires an on-link IPv4 VIP shared by the control-plane LAN. IPv6 configuration remains schema-valid, but this ARP phase explicitly rejects it pending NDP support. Network/broadcast addresses, routed VIPs, ambiguous subnets, and a VIP identical to the node address are rejected.
+
+Before writing anything, the role validates existing manifest ownership and probes for address conflicts with three ARP probes over a bounded four-second interval. Existing owners are allowed only when they are authenticated control-plane peers with a matching managed manifest; unrelated claims or simultaneous probes block the phase. This is a point-in-time network conflict check, not a DHCP reservation. Reserve the VIP outside the DHCP allocation pool.
+
+The role writes an owner-only `/etc/kubernetes/manifests/kube-vip.yaml` with the pinned kube-vip version, host networking, control-plane leader election, and only NET_ADMIN/NET_RAW capabilities. It does not enable Kubernetes Service load balancing. Reapplication requires byte-identical managed content and is idempotent; unmanaged or edited files require explicit recovery.
+
+The primary initially mounts `super-admin.conf`, which kubeadm creates during initialization. After a successful initialization, the control-plane phase must switch it to `admin.conf` and write the cluster-specific `.bareplane-init-complete` marker. Other control planes use `admin.conf`. The VIP role creates neither credentials nor cluster state and performs no kubeadm init/join. VM CI checks an occupied VIP using an isolated network namespace, manifest refusal, interface selection, and an unchanged second application.
 
 ## Local bootstrap doctor
 

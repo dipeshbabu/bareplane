@@ -1,0 +1,57 @@
+# Managed by Bareplane api_vip v1. Changes require explicit recovery.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kube-vip
+  namespace: kube-system
+  annotations:
+    bareplane.io/cluster: {{ bareplane_cluster | to_json }}
+spec:
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+  containers:
+    - name: kube-vip
+      image: ghcr.io/kube-vip/kube-vip:v{{ bareplane_kube_vip_version }}
+      imagePullPolicy: IfNotPresent
+      args: [manager]
+      env:
+        - name: vip_arp
+          value: "true"
+        - name: vip_interface
+          value: {{ bareplane_vip_facts.interface | to_json }}
+        - name: vip_subnet
+          value: "32"
+        - name: port
+          value: {{ bareplane_api_port | string | to_json }}
+        - name: address
+          value: {{ bareplane_api_vip | to_json }}
+        - name: cp_enable
+          value: "true"
+        - name: cp_namespace
+          value: kube-system
+        - name: svc_enable
+          value: "false"
+        - name: vip_leaderelection
+          value: "true"
+        - name: vip_leaseduration
+          value: "15"
+        - name: vip_renewdeadline
+          value: "10"
+        - name: vip_retryperiod
+          value: "2"
+      securityContext:
+        runAsUser: 0
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+          add: [NET_ADMIN, NET_RAW]
+      volumeMounts:
+        - name: kubeconfig
+          mountPath: /etc/kubernetes/admin.conf
+          readOnly: true
+  volumes:
+    - name: kubeconfig
+      hostPath:
+        path: /etc/kubernetes/{{ bareplane_vip_kubeconfig }}
+        type: File
