@@ -90,7 +90,7 @@ ansible-playbook --syntax-check site.yaml
 ansible-playbook validate.yaml
 ```
 
-The second command previews the contract entirely on the controller. `site.yaml` orders host preparation, package installation, API VIP, primary control plane, Cilium, joins, kubeconfig, and health. Preparation through node joining is implemented; subsequent phases stop with explicit issue-specific errors until issues #64–#65 implement them. Syntax validation and contract preview do not indicate a bootstrapped cluster.
+The second command previews the contract entirely on the controller. `site.yaml` orders host preparation, package installation, API VIP, primary control plane, Cilium, joins, kubeconfig, and health. Preparation through private kubeconfig retrieval is implemented; the full health gate remains issue #65. Syntax validation and contract preview do not indicate a bootstrapped cluster.
 
 ## Kubernetes packages
 
@@ -153,6 +153,23 @@ Join intent binds the cluster CA, machine name, observed IP, role, version, and 
 Foreign clusters, unmanaged existing nodes, changed identities, and incomplete kubeadm attempts are refused without reset. Inspect `/var/lib/bareplane/bootstrap/join-output` privately; its bounded, owner-only output may contain sensitive join material. Check mode is intentionally unsupported for joining new nodes. Run the complete join playbook, not an inventory-limited subset, so the final gate can verify the exact desired topology.
 
 The implementation follows the supported [kubeadm join](https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-join/) and [high-availability certificate upload](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/high-availability/) workflows. Workload labels remain outside bootstrap ownership.
+
+## Private operator kubeconfig
+
+After the complete desired topology is Ready, `kubeconfig.yaml` retrieves the primary's bounded, owner-only admin kubeconfig over the authenticated SSH connection. It verifies the cluster name and CA against the primary, validates the embedded certificate/key pair with controller-side OpenSSL, and rewrites the server to the configured API VIP. Exec plugins, external key/CA paths, bearer tokens, proxy settings, insecure TLS, extra contexts, and ambiguous YAML are refused.
+
+The canonical file is `.bareplane/state/bootstrap/admin.conf`, with mode `0600` inside owner-only state directories. It is separate from generated output and survives re-rendering. Atomic first publication never overwrites an existing file. A matching, integrity-checked, unexpired managed credential is preserved on reruns; an unmanaged file, changed CA/cluster/VIP, symlink, insecure permissions, or expired credential requires explicit recovery. Credential renewal belongs to an explicit lifecycle operation, not an implicit overwrite during bootstrap.
+
+Use it without modifying your global configuration:
+
+```bash
+export KUBECONFIG="$PWD/.bareplane/state/bootstrap/admin.conf"
+kubectl get nodes
+```
+
+The role never changes `~/.kube/config`, prints credential contents, or persists the canonical file under `/tmp`. Ansible's controller environment needs OpenSSL 3; validation checks that the client certificate is signed by the exact cluster CA and matches the embedded key. Check mode validates identity and predicts a missing-file write without persisting credentials.
+
+After a cluster is reset or its infrastructure destroyed, stop using and explicitly remove this project-local credential as part of that lifecycle operation. Bareplane must not adopt an old credential for a rebuilt cluster with a new CA. Losing only the local file is recoverable by rerunning `kubeconfig.yaml` against the same fully formed cluster. Do not delete ownership metadata merely to bypass a cluster-identity refusal. The guarded reset command owns automated credential withdrawal in issue #67; infrastructure destruction remains Terraform-owned.
 
 ## Local bootstrap doctor
 

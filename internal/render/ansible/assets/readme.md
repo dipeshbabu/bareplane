@@ -21,6 +21,8 @@ control_plane_init initializes the primary with private, configuration-bound sta
 Cilium installs the reviewed CNI chart and verifies primary networking.
 Join expands stacked-etcd control planes, then workers, with temporary credentials
 and configuration/CA-bound ownership checks; completed nodes are not rejoined.
+Kubeconfig retrieves a verified private admin credential only after topology
+formation and stores it under ../state/bootstrap/admin.conf, never ~/.kube/config.
 Other phase roles stop with a specific error until their issues
 are implemented (including in check mode).
 Guarded end-to-end CLI orchestration is still a separate phase. Do not interpret

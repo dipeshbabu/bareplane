@@ -1,5 +1,57 @@
 ---
-- name: Refuse the unavailable kubeconfig phase
-  ansible.builtin.fail:
-    msg: "Bootstrap phase kubeconfig is not implemented; see Bareplane issue #64."
-  tags: [always]
+- name: Require primary ownership and bootstrap networking before retrieval
+  ansible.builtin.import_role:
+    name: join_primary
+
+- name: Require complete desired cluster formation before retrieval
+  ansible.builtin.import_role:
+    name: join_topology
+
+- name: Inspect the primary admin credential without reading its contents
+  ansible.builtin.stat:
+    path: /etc/kubernetes/admin.conf
+    follow: false
+    get_checksum: false
+  register: bareplane_admin_file
+
+- name: Require a bounded private regular admin kubeconfig
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == bareplane_primary_control_plane
+      - bareplane_join_primary.ca_sha256 is defined
+      - bareplane_admin_file.stat.isreg | default(false) and not bareplane_admin_file.stat.islnk | default(false)
+      - bareplane_admin_file.stat.uid == 0
+      - bareplane_admin_file.stat.mode == '0600'
+      - bareplane_admin_file.stat.size > 0 and bareplane_admin_file.stat.size <= 65536
+    quiet: true
+    fail_msg: A complete primary with a private regular admin kubeconfig is required.
+
+- name: Retrieve and store the credential without displaying secret data
+  block:
+    - name: Read the primary admin kubeconfig over authenticated SSH
+      ansible.builtin.slurp:
+        src: /etc/kubernetes/admin.conf
+      register: bareplane_admin_source
+      no_log: true
+
+    - name: Publish or verify the private project kubeconfig on the controller
+      bareplane_kubeconfig:
+        destination: "{{ inventory_dir }}/../state/bootstrap/admin.conf"
+        content: "{{ bareplane_admin_source.content }}"
+        cluster: "{{ bareplane_cluster }}"
+        ca_sha256: "{{ bareplane_join_primary.ca_sha256 }}"
+        vip: "{{ bareplane_api_vip }}"
+        port: "{{ bareplane_api_port }}"
+      delegate_to: localhost
+      become: false
+      vars:
+        ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  always:
+    - name: Clear the controller's temporary credential fact
+      ansible.builtin.set_fact:
+        bareplane_admin_source: {}
+      no_log: true
+
+- name: Report only the canonical local path
+  ansible.builtin.debug:
+    msg: "Use KUBECONFIG={{ inventory_dir }}/../state/bootstrap/admin.conf; your global kubeconfig was not modified."
