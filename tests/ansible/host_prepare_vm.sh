@@ -72,3 +72,12 @@ fi
 cat "$workspace/cilium-rerun.log"
 grep -Eq 'changed=0 .*unreachable=0 .*failed=0' "$workspace/cilium-rerun.log"
 ansible-playbook -i tests/ansible/control_plane.ini tests/ansible/join_single.yaml
+cp tests/ansible/control_plane.ini "$workspace/.bareplane/bootstrap/local.ini"
+ansible-playbook -i "$workspace/.bareplane/bootstrap/local.ini" tests/ansible/kubeconfig_partial.yaml
+ansible-playbook -i "$workspace/.bareplane/bootstrap/local.ini" tests/ansible/kubeconfig_single.yaml
+if ! ansible-playbook -i "$workspace/.bareplane/bootstrap/local.ini" tests/ansible/kubeconfig_single.yaml > "$workspace/kubeconfig-rerun.log" 2>&1; then
+  cat "$workspace/kubeconfig-rerun.log"
+  exit 1
+fi
+cat "$workspace/kubeconfig-rerun.log"
+grep -Eq 'changed=0 .*unreachable=0 .*failed=0' "$workspace/kubeconfig-rerun.log"

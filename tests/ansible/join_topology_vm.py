@@ -184,6 +184,16 @@ def main():
         descriptions = ssh(names[0], 'kubectl --kubeconfig /etc/kubernetes/admin.conf -n kube-system get secrets -o jsonpath="{.items[*].data.description}"', capture_output=True, text=True)
         if 'YmFyZXBsYW5lLW5vZGUtam9pbg==' in descriptions.stdout:
             raise RuntimeError('A Bareplane node join token was not revoked')
+        play('kubeconfig.yaml')
+        exported = bundle.parent / 'state/bootstrap/admin.conf'
+        if exported.stat().st_mode & 0o777 != 0o600:
+            raise RuntimeError('Exported kubeconfig permissions are not private')
+        # Verify this real multi-node cluster using the canonical controller
+        # credential, without reading or displaying the certificate/key data.
+        before = exported.stat().st_mtime_ns
+        play('kubeconfig.yaml')
+        if exported.stat().st_mtime_ns != before:
+            raise RuntimeError('An unchanged kubeconfig was rewritten')
         print('Three stacked-etcd control planes and one worker: joined, Ready, credentials cleaned, unchanged rerun.', flush=True)
     finally:
         for guest in guests:
