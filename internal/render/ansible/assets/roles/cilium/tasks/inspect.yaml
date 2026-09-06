@@ -1,0 +1,123 @@
+---
+- name: Read controller architecture
+  ansible.builtin.setup:
+    gather_subset: ['!all', min]
+
+- name: Require the primary and approved Cilium artifacts
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == bareplane_primary_control_plane
+      - bareplane_kube_proxy_replacement | bool
+      - ansible_facts.architecture in bareplane_helm_arches
+      - bareplane_cilium_version in bareplane_cilium_sha256
+    quiet: true
+    fail_msg: Cilium bootstrap requires the primary, kube-proxy replacement, and a reviewed artifact version.
+
+- name: Inspect bootstrap directories
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop: [/var/lib/bareplane, /var/lib/bareplane/bootstrap, /etc/cni, /etc/cni/net.d]
+  register: bareplane_cilium_dirs
+
+- name: Require real prepared directories
+  ansible.builtin.assert:
+    that: item.stat.isdir | default(false) and not item.stat.islnk | default(false)
+    quiet: true
+    fail_msg: Cilium requires real prepared bootstrap and CNI directories.
+  loop: "{{ bareplane_cilium_dirs.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Verify completed primary initialization
+  ansible.builtin.stat:
+    path: /etc/kubernetes/.bareplane-init-complete
+    follow: false
+    checksum_algorithm: sha256
+  register: bareplane_cilium_primary
+
+- name: Require this cluster's initialization marker
+  ansible.builtin.assert:
+    that:
+      - bareplane_cilium_primary.stat.isreg | default(false) and not bareplane_cilium_primary.stat.islnk | default(false)
+      - bareplane_cilium_primary.stat.checksum | default('') == ((bareplane_cluster ~ '\n') | hash('sha256'))
+    quiet: true
+    fail_msg: Complete primary initialization before installing Cilium.
+
+- name: Inspect Cilium bootstrap state
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+    checksum_algorithm: sha256
+  loop: [/var/lib/bareplane/bootstrap/cilium-intent, /var/lib/bareplane/bootstrap/cilium-complete, /var/lib/bareplane/bootstrap/cilium-values.yaml, /var/lib/bareplane/bootstrap/cilium-chart.tgz]
+  register: bareplane_cilium_files
+
+- name: Refuse redirected bootstrap state files
+  ansible.builtin.assert:
+    that: not item.stat.exists or (item.stat.isreg | default(false) and not item.stat.islnk | default(false))
+    quiet: true
+    fail_msg: Cilium state files must be regular files.
+  loop: "{{ bareplane_cilium_files.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Bind installation to the exact chart and values
+  ansible.builtin.set_fact:
+    bareplane_cilium_values: "{{ lookup('ansible.builtin.template', 'values.yaml.j2') }}"
+    bareplane_cilium_done: "{{ bareplane_cilium_files.results[1].stat.exists }}"
+
+- name: Compute the installation digest
+  ansible.builtin.set_fact:
+    bareplane_cilium_digest: "{{ (bareplane_cilium_values ~ bareplane_cilium_sha256[bareplane_cilium_version]) | hash('sha256') }}"
+
+- name: Refuse partial or incompatible Cilium installation state
+  ansible.builtin.assert:
+    that:
+      - not bareplane_cilium_files.results[0].stat.exists
+      - not bareplane_cilium_files.results[2].stat.exists
+    quiet: true
+    fail_msg: An incomplete Cilium installation requires explicit recovery before another attempt.
+  when: not bareplane_cilium_done
+
+- name: Verify completed Cilium state matches the desired artifact and values
+  ansible.builtin.assert:
+    that:
+      - bareplane_cilium_files.results[0].stat.checksum | default('') == ((bareplane_cilium_digest ~ '\n') | hash('sha256'))
+      - bareplane_cilium_files.results[1].stat.checksum | default('') == ((bareplane_cilium_digest ~ '\n') | hash('sha256'))
+      - bareplane_cilium_files.results[2].stat.checksum | default('') == (bareplane_cilium_values | hash('sha256'))
+      - bareplane_cilium_files.results[3].stat.checksum | default('') == bareplane_cilium_sha256[bareplane_cilium_version]
+    quiet: true
+    fail_msg: Cilium state differs from the desired version or networking contract; use an explicit lifecycle workflow.
+  when: bareplane_cilium_done
+
+- name: Inspect existing CNI files
+  ansible.builtin.find:
+    paths: /etc/cni/net.d
+    file_type: any
+    hidden: true
+    follow: false
+  register: bareplane_cilium_cni
+
+- name: Refuse unmanaged CNI files
+  ansible.builtin.assert:
+    that: (item.isreg and item.path == '/etc/cni/net.d/.kubernetes-cni-keep' and item.size == 0) or (bareplane_cilium_done and item.isreg and item.path == '/etc/cni/net.d/05-cilium.conflist')
+    quiet: true
+    fail_msg: Existing CNI configuration cannot be adopted or overwritten by bootstrap.
+  loop: "{{ bareplane_cilium_cni.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Inspect Cilium and kube-proxy resources
+  ansible.builtin.command: kubectl --kubeconfig /etc/kubernetes/admin.conf --request-timeout=10s -n kube-system get daemonsets -o json
+  changed_when: false
+  check_mode: false
+  register: bareplane_cilium_daemonsets
+
+- name: Refuse other CNI or kube-proxy DaemonSets
+  ansible.builtin.assert:
+    that: (item.metadata.name is not search('(?i)calico|flannel|weave|antrea|canal|kube-router|kube-proxy|cilium')) or (item.metadata.name == 'cilium' and bareplane_cilium_done and item.metadata.annotations['meta.helm.sh/release-name'] | default('') == 'bareplane-cilium' and item.metadata.annotations['meta.helm.sh/release-namespace'] | default('') == 'kube-system')
+    quiet: true
+    fail_msg: A conflicting or unmanaged CNI/kube-proxy resource already exists.
+  loop: "{{ (bareplane_cilium_daemonsets.stdout | from_json)['items'] }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"

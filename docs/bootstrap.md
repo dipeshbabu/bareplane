@@ -90,7 +90,7 @@ ansible-playbook --syntax-check site.yaml
 ansible-playbook validate.yaml
 ```
 
-The second command previews the contract entirely on the controller. `site.yaml` orders host preparation, package installation, API VIP, primary control plane, Cilium, joins, kubeconfig, and health. Preparation through primary control-plane initialization is implemented; subsequent phases stop with explicit issue-specific errors until issues #62–#65 implement them. Syntax validation and contract preview do not indicate a bootstrapped cluster.
+The second command previews the contract entirely on the controller. `site.yaml` orders host preparation, package installation, API VIP, primary control plane, Cilium, joins, kubeconfig, and health. Preparation through primary Cilium networking is implemented; subsequent phases stop with explicit issue-specific errors until issues #63–#65 implement them. Syntax validation and contract preview do not indicate a bootstrapped cluster.
 
 ## Kubernetes packages
 
@@ -131,6 +131,16 @@ Before mutation it checks for ambiguous Kubernetes/etcd state, redirected paths,
 Kubeadm output is capped and written directly to an owner-only file in that private state directory. It may contain join tokens and uploaded-certificate keys, so it must not be logged or copied into generated inventory. Initialization has a 15-minute limit and skips kube-proxy. API readiness through the VIP gates the credential handoff from `super-admin.conf` to `admin.conf`; only then is `.bareplane-init-complete` written. Reapplication verifies the marker and configuration digest and never reinitializes a completed cluster.
 
 Cilium remains a later phase. A working primary API and etcd do not yet imply a Ready Kubernetes node or working pod networking.
+
+## Cilium networking
+
+`cilium.yaml` installs the exact configured Cilium chart with full kube-proxy replacement, Kubernetes IPAM, VXLAN tunneling, and the configured API VIP. It keeps one operator replica during primary bootstrap, before other nodes join. Hubble, Gateway API, ingress, BGP, and L2 announcements stay disabled.
+
+The bootstrap installer currently includes reviewed SHA-256 artifact pins for Cilium 1.20.0 and 1.20.1 and Helm 3.21.4 on amd64/arm64. Newly released Cilium patches require adding their reviewed chart checksums before execution; the broader schema compatibility window does not imply an unknown artifact is installable. Helm lives in a private Bareplane directory and does not replace an operator's Helm installation.
+
+The release is named `bareplane-cilium` in `kube-system`. Bootstrap refuses existing CNI configuration and conflicting resources, and verifies its private intent/completion records, Helm chart/version, and live values on reruns. It never upgrades or reinstalls an unchanged release. Cilium remains bootstrap-owned and must be excluded from Argo CD handoff. Any partial installation, conflicting CNI, or changed networking contract requires explicit recovery or lifecycle planning.
+
+Completion requires bounded readiness checks for the Cilium DaemonSet and operator, the primary node, and CoreDNS, followed by an authenticated API request through the Kubernetes ClusterIP to verify service routing without kube-proxy. A completion record is written only after those checks pass.
 
 ## Local bootstrap doctor
 

@@ -64,6 +64,20 @@
     group: root
   when: not bareplane_init_done and not ansible_check_mode
 
+- name: Wait for the updated kube-vip pod through the direct node API
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, "--server=https://{{ bareplane_vip_facts.node_address }}:{{ bareplane_api_port }}", --request-timeout=5s, -n, kube-system, get, pod, "kube-vip-{{ inventory_hostname }}", -o, json]
+  changed_when: false
+  no_log: true
+  register: bareplane_vip_handoff
+  until:
+    - bareplane_vip_handoff.rc == 0
+    - ((bareplane_vip_handoff.stdout | from_json).spec.volumes | selectattr('name', 'equalto', 'kubeconfig') | map(attribute='hostPath.path') | list) == ['/etc/kubernetes/admin.conf']
+    - ((bareplane_vip_handoff.stdout | from_json).status.conditions | default([]) | selectattr('type', 'equalto', 'Ready') | map(attribute='status') | list) == ['True']
+  retries: 24
+  delay: 5
+  when: not ansible_check_mode
+
 - name: Verify API readiness after the credential handoff
   ansible.builtin.import_tasks: ready.yaml
 

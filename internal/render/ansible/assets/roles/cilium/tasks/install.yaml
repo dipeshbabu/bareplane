@@ -1,0 +1,139 @@
+---
+- name: Inspect the private Helm directory
+  ansible.builtin.stat:
+    path: "{{ bareplane_helm_root }}"
+    follow: false
+  register: bareplane_helm_directory
+
+- name: Refuse redirected Helm tooling
+  ansible.builtin.assert:
+    that: not bareplane_helm_directory.stat.exists or (bareplane_helm_directory.stat.isdir | default(false) and not bareplane_helm_directory.stat.islnk | default(false))
+    quiet: true
+    fail_msg: Private Helm tooling must not be redirected.
+
+- name: Inspect the private Helm extraction directory
+  ansible.builtin.stat:
+    path: "{{ bareplane_helm_root }}/linux-{{ bareplane_helm_arches[ansible_facts.architecture] }}"
+    follow: false
+  register: bareplane_helm_extraction
+
+- ansible.builtin.assert:
+    that: not bareplane_helm_extraction.stat.exists or (bareplane_helm_extraction.stat.isdir | default(false) and not bareplane_helm_extraction.stat.islnk | default(false))
+    quiet: true
+    fail_msg: Helm extraction paths must not be redirected.
+
+- name: Inspect existing Helm files before using them
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+    follow: false
+    checksum_algorithm: sha256
+  loop:
+    - path: "{{ bareplane_helm_root }}/helm.tar.gz"
+      digest: "{{ bareplane_helm_sha256[bareplane_helm_arches[ansible_facts.architecture]] }}"
+    - path: "{{ bareplane_helm_binary }}"
+      digest: "{{ bareplane_helm_binary_sha256[bareplane_helm_arches[ansible_facts.architecture]] }}"
+  register: bareplane_helm_files
+
+- name: Refuse unverified or redirected Helm files
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (item.stat.isreg | default(false) and not item.stat.islnk | default(false))
+      - not item.stat.exists or item.stat.checksum | default('') == item.item.digest
+    quiet: true
+    fail_msg: Private Helm files differ from their verified artifact pins.
+  loop: "{{ bareplane_helm_files.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+
+- name: Create the private Helm directory
+  ansible.builtin.file:
+    path: "{{ bareplane_helm_root }}"
+    state: directory
+    mode: '0700'
+    owner: root
+    group: root
+
+- name: Download the checksum-pinned Helm archive
+  ansible.builtin.get_url:
+    url: "https://get.helm.sh/helm-v{{ bareplane_helm_version }}-linux-{{ bareplane_helm_arches[ansible_facts.architecture] }}.tar.gz"
+    dest: "{{ bareplane_helm_root }}/helm.tar.gz"
+    checksum: "sha256:{{ bareplane_helm_sha256[bareplane_helm_arches[ansible_facts.architecture]] }}"
+    mode: '0600'
+    timeout: 30
+
+- name: Extract the verified Helm binary in its private directory
+  ansible.builtin.unarchive:
+    src: "{{ bareplane_helm_root }}/helm.tar.gz"
+    dest: "{{ bareplane_helm_root }}"
+    remote_src: true
+    creates: "{{ bareplane_helm_binary }}"
+
+- name: Verify the pinned Helm client version
+  ansible.builtin.command:
+    argv: ["{{ bareplane_helm_binary }}", version, --short]
+  changed_when: false
+  check_mode: false
+  register: bareplane_helm_installed
+
+- ansible.builtin.assert:
+    that: bareplane_helm_installed.stdout.split('+')[0] == 'v' ~ bareplane_helm_version
+    quiet: true
+    fail_msg: The private Helm client version does not match its pin.
+
+- name: Inspect any existing Helm release
+  ansible.builtin.command:
+    argv: ["{{ bareplane_helm_binary }}", list, --kubeconfig, /etc/kubernetes/admin.conf, --namespace, kube-system, --all, --filter, '^bareplane-cilium$', --output, json]
+  changed_when: false
+  check_mode: false
+  register: bareplane_cilium_releases
+
+- name: Require unambiguous release ownership
+  ansible.builtin.assert:
+    that:
+      - ((bareplane_cilium_releases.stdout | from_json) | length) == (1 if bareplane_cilium_done else 0)
+      - not bareplane_cilium_done or (bareplane_cilium_releases.stdout | from_json)[0].status == 'deployed'
+      - not bareplane_cilium_done or (bareplane_cilium_releases.stdout | from_json)[0].chart == 'cilium-' ~ bareplane_cilium_version
+    quiet: true
+    fail_msg: Existing Helm release state is unmanaged, incomplete, or incompatible.
+
+- name: Download the reviewed Cilium chart
+  ansible.builtin.get_url:
+    url: "https://helm.cilium.io/cilium-{{ bareplane_cilium_version }}.tgz"
+    dest: /var/lib/bareplane/bootstrap/cilium-chart.tgz
+    checksum: "sha256:{{ bareplane_cilium_sha256[bareplane_cilium_version] }}"
+    mode: '0600'
+    timeout: 30
+  when: not bareplane_cilium_done
+
+- name: Write reviewed Cilium values
+  ansible.builtin.copy:
+    content: "{{ bareplane_cilium_values }}"
+    dest: /var/lib/bareplane/bootstrap/cilium-values.yaml
+    mode: '0600'
+  when: not bareplane_cilium_done
+
+- name: Record installation intent
+  ansible.builtin.copy:
+    content: "{{ bareplane_cilium_digest }}\n"
+    dest: /var/lib/bareplane/bootstrap/cilium-intent
+    mode: '0600'
+  when: not bareplane_cilium_done
+
+- name: Install bootstrap-owned Cilium with full kube-proxy replacement
+  ansible.builtin.command:
+    argv: ["{{ bareplane_helm_binary }}", install, bareplane-cilium, /var/lib/bareplane/bootstrap/cilium-chart.tgz, --kubeconfig, /etc/kubernetes/admin.conf, --namespace, kube-system, --values, /var/lib/bareplane/bootstrap/cilium-values.yaml, --wait, --atomic, --timeout, 5m]
+  changed_when: true
+  when: not bareplane_cilium_done and not ansible_check_mode
+
+- name: Verify live Helm values have not drifted
+  ansible.builtin.command:
+    argv: ["{{ bareplane_helm_binary }}", get, values, bareplane-cilium, --kubeconfig, /etc/kubernetes/admin.conf, --namespace, kube-system, --output, json]
+  changed_when: false
+  register: bareplane_cilium_live_values
+  when: not ansible_check_mode
+
+- ansible.builtin.assert:
+    that: (bareplane_cilium_live_values.stdout | from_json) == (bareplane_cilium_values | from_yaml)
+    quiet: true
+    fail_msg: Live Cilium Helm values differ from the reviewed bootstrap contract.
+  when: not ansible_check_mode

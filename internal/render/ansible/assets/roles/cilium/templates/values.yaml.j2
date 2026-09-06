@@ -1,0 +1,26 @@
+kubeProxyReplacement: true
+k8sServiceHost: {{ bareplane_api_vip | to_json }}
+k8sServicePort: {{ bareplane_api_port }}
+ipam:
+  mode: kubernetes
+routingMode: tunnel
+tunnelProtocol: vxlan
+l7Proxy: false
+envoy:
+  enabled: false
+ipv4:
+  enabled: true
+ipv6:
+  enabled: false
+operator:
+  replicas: 1
+hubble:
+  enabled: false
+bgpControlPlane:
+  enabled: false
+gatewayAPI:
+  enabled: false
+ingressController:
+  enabled: false
+l2announcements:
+  enabled: false

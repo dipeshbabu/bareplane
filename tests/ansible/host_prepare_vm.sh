@@ -64,3 +64,10 @@ if ! ansible-playbook -i tests/ansible/control_plane.ini tests/ansible/primary_i
 fi
 cat "$workspace/primary-rerun.log"
 grep -Eq 'changed=0 .*unreachable=0 .*failed=0' "$workspace/primary-rerun.log"
+ansible-playbook -i tests/ansible/control_plane.ini tests/ansible/cilium.yaml
+if ! ansible-playbook -i tests/ansible/control_plane.ini tests/ansible/cilium.yaml > "$workspace/cilium-rerun.log" 2>&1; then
+  cat "$workspace/cilium-rerun.log"
+  exit 1
+fi
+cat "$workspace/cilium-rerun.log"
+grep -Eq 'changed=0 .*unreachable=0 .*failed=0' "$workspace/cilium-rerun.log"

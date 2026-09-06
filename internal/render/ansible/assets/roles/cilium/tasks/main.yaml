@@ -1,5 +1,9 @@
 ---
-- name: Refuse the unavailable cilium phase
-  ansible.builtin.fail:
-    msg: "Bootstrap phase cilium is not implemented; see Bareplane issue #62."
-  tags: [always]
+- name: Inspect Cilium prerequisites and ownership
+  ansible.builtin.import_tasks: inspect.yaml
+
+- name: Install the pinned Cilium release
+  ansible.builtin.import_tasks: install.yaml
+
+- name: Verify Cilium and Kubernetes networking
+  ansible.builtin.import_tasks: ready.yaml
