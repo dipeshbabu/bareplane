@@ -42,3 +42,18 @@ if ! ansible-playbook -i tests/ansible/control_plane.ini tests/ansible/api_vip.y
 fi
 cat "$workspace/vip-rerun.log"
 grep -Eq 'changed=0 .*unreachable=0 .*failed=0' "$workspace/vip-rerun.log"
+ansible-playbook -i tests/ansible/control_plane.ini tests/ansible/primary_refuse_partial.yaml
+if ! ansible-playbook -i tests/ansible/control_plane.ini tests/ansible/primary_init.yaml; then
+  # Only bounded error lines from this disposable fixture; never publish join output.
+  if test -f /var/lib/bareplane/bootstrap/init-output; then
+    grep -Ei '\[ERROR|error execution|timed out|failed' /var/lib/bareplane/bootstrap/init-output \
+      | tail -20 | sed -E 's/[[:alnum:]+\/_=-]{32,}/[redacted]/g; s/[a-z0-9]{6}\.[a-z0-9]{16}/[redacted]/g' || true
+  fi
+  exit 1
+fi
+if ! ansible-playbook -i tests/ansible/control_plane.ini tests/ansible/primary_init.yaml > "$workspace/primary-rerun.log" 2>&1; then
+  cat "$workspace/primary-rerun.log"
+  exit 1
+fi
+cat "$workspace/primary-rerun.log"
+grep -Eq 'changed=0 .*unreachable=0 .*failed=0' "$workspace/primary-rerun.log"

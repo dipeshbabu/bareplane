@@ -1,0 +1,50 @@
+---
+- name: Refuse incomplete initialization without running kubeadm
+  hosts: control_plane
+  connection: local
+  gather_facts: false
+  vars:
+    bareplane_cluster: lab
+    bareplane_primary_control_plane: localhost
+    bareplane_api_vip: 192.0.2.100
+    bareplane_api_port: 6443
+    bareplane_kube_vip_version: '1.2.3'
+    bareplane_kubernetes_version: '1.36.4'
+    bareplane_kube_proxy_replacement: true
+    bareplane_pod_cidr: 10.244.0.0/16
+    bareplane_service_cidr: 10.96.0.0/12
+  tasks:
+    - name: Require disposable VM context
+      ansible.builtin.assert:
+        that: lookup('ansible.builtin.env', 'BAREPLANE_DISPOSABLE_VM') == '1'
+    - name: Create fixture state directory
+      ansible.builtin.file:
+        path: /var/lib/bareplane/bootstrap
+        state: directory
+        mode: '0700'
+    - name: Create incomplete attempt fixture
+      ansible.builtin.copy:
+        dest: /var/lib/bareplane/bootstrap/init-intent
+        content: "incomplete fixture\n"
+        mode: '0600'
+    - name: Try to initialize over incomplete state
+      block:
+        - ansible.builtin.include_role:
+            name: control_plane_init
+      rescue:
+        - ansible.builtin.assert:
+            that: "'previous initialization attempt is incomplete' in ansible_failed_result.msg"
+        - ansible.builtin.set_fact:
+            partial_refused: true
+    - ansible.builtin.assert:
+        that: partial_refused | default(false)
+    - name: Check no initialization output exists
+      ansible.builtin.stat:
+        path: /var/lib/bareplane/bootstrap/init-output
+      register: partial_output
+    - ansible.builtin.assert:
+        that: not partial_output.stat.exists
+    - name: Remove only the incomplete fixture
+      ansible.builtin.file:
+        path: /var/lib/bareplane/bootstrap/init-intent
+        state: absent

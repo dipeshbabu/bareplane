@@ -1,0 +1,30 @@
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: {{ bareplane_vip_facts.node_address | to_json }}
+  bindPort: {{ bareplane_api_port }}
+nodeRegistration:
+  name: {{ inventory_hostname | to_json }}
+  criSocket: unix:///run/containerd/containerd.sock
+  kubeletExtraArgs:
+    - name: node-ip
+      value: {{ bareplane_vip_facts.node_address | to_json }}
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+clusterName: {{ bareplane_cluster | to_json }}
+kubernetesVersion: v{{ bareplane_kubernetes_version }}
+controlPlaneEndpoint: {{ (bareplane_api_vip ~ ':' ~ bareplane_api_port) | to_json }}
+networking:
+  podSubnet: {{ bareplane_pod_cidr | to_json }}
+  serviceSubnet: {{ bareplane_service_cidr | to_json }}
+  dnsDomain: cluster.local
+etcd:
+  local:
+    dataDir: /var/lib/etcd
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cgroupDriver: systemd
+containerRuntimeEndpoint: unix:///run/containerd/containerd.sock
+failSwapOn: true

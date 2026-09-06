@@ -1,0 +1,134 @@
+---
+- name: Require the primary machine and kube-proxy replacement
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == bareplane_primary_control_plane
+      - bareplane_kube_proxy_replacement | bool
+    quiet: true
+    fail_msg: Initialization must run only on the deterministic primary with Cilium kube-proxy replacement.
+
+- name: Refresh the primary address from live interface facts
+  bareplane_vip_probe:
+    vip: "{{ bareplane_api_vip }}"
+  register: bareplane_vip_facts
+
+- name: Inspect initialization directory boundaries
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop: [/etc/kubernetes, /etc/kubernetes/manifests, /var/lib, /var/lib/bareplane, /var/lib/bareplane/bootstrap]
+  register: bareplane_init_directories
+
+- name: Refuse redirected initialization directories
+  ansible.builtin.assert:
+    that: not item.stat.exists or (item.stat.isdir | default(false) and not item.stat.islnk | default(false))
+    quiet: true
+    fail_msg: "Initialization directory {{ item.item }} is not a real directory."
+  loop: "{{ bareplane_init_directories.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Inspect initialization marker and intent
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+    checksum_algorithm: sha256
+  loop: [/etc/kubernetes/.bareplane-init-complete, /var/lib/bareplane/bootstrap/init-intent, /var/lib/bareplane/bootstrap/kubeadm.yaml, /var/lib/bareplane/bootstrap/init-output]
+  register: bareplane_init_files
+
+- name: Refuse redirected initialization files
+  ansible.builtin.assert:
+    that: not item.stat.exists or (item.stat.isreg | default(false) and not item.stat.islnk | default(false))
+    quiet: true
+    fail_msg: "Initialization state file {{ item.item }} must be a regular file."
+  loop: "{{ bareplane_init_files.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Bind this attempt to the rendered kubeadm configuration
+  ansible.builtin.set_fact:
+    bareplane_init_done: "{{ bareplane_init_files.results[0].stat.exists }}"
+    bareplane_init_digest: "{{ lookup('ansible.builtin.template', 'kubeadm.yaml.j2') | hash('sha256') }}"
+
+- name: Verify completed initialization belongs to this cluster and configuration
+  ansible.builtin.assert:
+    that:
+      - bareplane_init_files.results[0].stat.checksum | default('') == ((bareplane_cluster ~ '\n') | hash('sha256'))
+      - bareplane_init_files.results[1].stat.checksum | default('') == ((bareplane_init_digest ~ '\n') | hash('sha256'))
+      - bareplane_init_files.results[2].stat.checksum | default('') == bareplane_init_digest
+    quiet: true
+    fail_msg: Completed initialization differs from the requested cluster or configuration; use recovery or upgrade planning.
+  when: bareplane_init_done
+
+- name: Refuse a previous incomplete initialization attempt
+  ansible.builtin.assert:
+    that:
+      - not bareplane_init_files.results[1].stat.exists
+      - not bareplane_init_files.results[2].stat.exists
+      - not bareplane_init_files.results[3].stat.exists
+    quiet: true
+    fail_msg: A previous initialization attempt is incomplete. Inspect private bootstrap state and use explicit recovery; no automatic retry or reset is allowed.
+  when: not bareplane_init_done
+
+- name: Inspect pre-existing Kubernetes files
+  ansible.builtin.find:
+    paths: /etc/kubernetes
+    recurse: true
+    hidden: true
+    follow: false
+    file_type: any
+  register: bareplane_init_existing
+  when: not bareplane_init_done
+
+- name: Require a demonstrably uninitialized Kubernetes directory
+  ansible.builtin.assert:
+    that: (item.path == '/etc/kubernetes/manifests' and item.isdir) or (item.path in ['/etc/kubernetes/manifests/.kubelet-keep', '/etc/kubernetes/manifests/kube-vip.yaml'] and item.isreg)
+    quiet: true
+    fail_msg: "Ambiguous Kubernetes state at {{ item.path }} blocks initialization."
+  loop: "{{ bareplane_init_existing.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Inspect existing etcd data without reading it
+  ansible.builtin.stat:
+    path: /var/lib/etcd
+    follow: false
+  register: bareplane_init_etcd
+
+- name: Refuse existing etcd data before first initialization
+  ansible.builtin.assert:
+    that: not bareplane_init_etcd.stat.exists
+    quiet: true
+    fail_msg: Existing etcd state blocks initialization; it will not be reset automatically.
+  when: not bareplane_init_done
+
+- name: Select the expected VIP credential reference
+  ansible.builtin.set_fact:
+    bareplane_vip_kubeconfig: "{{ 'admin.conf' if bareplane_init_done else 'super-admin.conf' }}"
+
+- name: Verify the managed VIP manifest
+  ansible.builtin.stat:
+    path: /etc/kubernetes/manifests/kube-vip.yaml
+    follow: false
+    checksum_algorithm: sha256
+  register: bareplane_init_vip
+
+- name: Require the matching kube-vip manifest
+  ansible.builtin.assert:
+    that:
+      - bareplane_init_vip.stat.isreg | default(false) and not bareplane_init_vip.stat.islnk | default(false)
+      - bareplane_init_vip.stat.checksum | default('') == (lookup('ansible.builtin.template', role_path ~ '/../api_vip/templates/kube-vip.yaml.j2') | hash('sha256'))
+    quiet: true
+    fail_msg: The VIP manifest is missing or does not match this initialization phase.
+
+- name: Verify the requested kubeadm toolchain
+  ansible.builtin.command: kubeadm version -o short
+  changed_when: false
+  check_mode: false
+  register: bareplane_init_kubeadm
+
+- name: Require the exact kubeadm version
+  ansible.builtin.assert:
+    that: bareplane_init_kubeadm.stdout == 'v' ~ bareplane_kubernetes_version
+    quiet: true
+    fail_msg: Install the exact Kubernetes toolchain before initialization.

@@ -1,0 +1,77 @@
+---
+- name: Create private bootstrap state directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0700'
+    owner: root
+    group: root
+  loop: [/var/lib/bareplane, /var/lib/bareplane/bootstrap]
+
+- name: Write the reviewed kubeadm configuration
+  ansible.builtin.template:
+    src: kubeadm.yaml.j2
+    dest: /var/lib/bareplane/bootstrap/kubeadm.yaml
+    mode: '0600'
+    owner: root
+    group: root
+  when: not bareplane_init_done
+
+- name: Record intent before any cluster mutation
+  ansible.builtin.copy:
+    content: "{{ bareplane_init_digest }}\n"
+    dest: /var/lib/bareplane/bootstrap/init-intent
+    mode: '0600'
+    owner: root
+    group: root
+  when: not bareplane_init_done
+
+- name: Initialize kubeadm with private bounded output and no kube-proxy
+  ansible.builtin.shell: |
+    umask 077
+    ulimit -f 1024
+    timeout --kill-after=10s 900s kubeadm init \
+      --config /var/lib/bareplane/bootstrap/kubeadm.yaml \
+      --skip-phases=addon/kube-proxy --upload-certs \
+      > /var/lib/bareplane/bootstrap/init-output 2>&1
+  register: bareplane_init_attempt
+  no_log: true
+  changed_when: true
+  failed_when: false
+  when: not bareplane_init_done and not ansible_check_mode
+
+- name: Require successful initialization before advancing state
+  ansible.builtin.assert:
+    that: bareplane_init_attempt.rc == 0
+    quiet: true
+    fail_msg: kubeadm initialization failed. Inspect /var/lib/bareplane/bootstrap/init-output privately and use explicit recovery; join credentials must not be published.
+  when: not bareplane_init_done and not ansible_check_mode
+
+- name: Verify initial API readiness
+  ansible.builtin.import_tasks: ready.yaml
+
+- name: Select the normal admin credential after initialization
+  ansible.builtin.set_fact:
+    bareplane_vip_kubeconfig: admin.conf
+  when: not bareplane_init_done and not ansible_check_mode
+
+- name: Switch kube-vip away from initial super-admin credentials
+  ansible.builtin.template:
+    src: "{{ role_path }}/../api_vip/templates/kube-vip.yaml.j2"
+    dest: /etc/kubernetes/manifests/kube-vip.yaml
+    mode: '0600'
+    owner: root
+    group: root
+  when: not bareplane_init_done and not ansible_check_mode
+
+- name: Verify API readiness after the credential handoff
+  ansible.builtin.import_tasks: ready.yaml
+
+- name: Mark initialization complete only after readiness succeeds
+  ansible.builtin.copy:
+    content: "{{ bareplane_cluster }}\n"
+    dest: /etc/kubernetes/.bareplane-init-complete
+    mode: '0600'
+    owner: root
+    group: root
+  when: not ansible_check_mode
