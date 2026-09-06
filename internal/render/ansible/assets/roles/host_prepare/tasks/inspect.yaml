@@ -20,7 +20,7 @@
   ansible.builtin.stat:
     path: "{{ item }}"
     follow: false
-  loop: "{{ ['/etc', '/etc/apt'] + bareplane_host_directories }}"
+  loop: "{{ ['/etc', '/etc/apt', '/etc/cni', '/etc/cni/net.d'] + bareplane_host_directories }}"
   register: bareplane_host_dirs
 
 - name: Reject redirected host configuration directories
@@ -73,7 +73,6 @@
     follow: false
   loop:
     - /etc/kubernetes
-    - /etc/cni/net.d
     - /var/lib/kubelet
     - /var/lib/etcd
     - /etc/docker
@@ -90,6 +89,28 @@
   loop: "{{ bareplane_existing_cluster.results }}"
   loop_control:
     label: "{{ item.item }}"
+
+- name: Inspect the CNI directory created by containerd
+  ansible.builtin.stat:
+    path: /etc/cni/net.d
+    follow: false
+  register: bareplane_cni_directory
+
+- name: Find existing CNI configuration or other entries
+  ansible.builtin.find:
+    paths: /etc/cni/net.d
+    file_type: any
+    hidden: true
+    recurse: false
+    follow: false
+  when: bareplane_cni_directory.stat.exists
+  register: bareplane_cni_contents
+
+- name: Refuse existing CNI contents while allowing containerd's empty directory
+  ansible.builtin.assert:
+    that: not bareplane_cni_directory.stat.exists or bareplane_cni_contents.matched | default(0) == 0
+    fail_msg: Existing CNI configuration requires lifecycle recovery before host preparation.
+    quiet: true
 
 - name: Read installed packages
   ansible.builtin.package_facts:

@@ -12,6 +12,9 @@ export ANSIBLE_NOCOLOR=1
 export PATH="/opt/ansible/bin:$PATH"
 mkdir -p /etc/containerd
 ansible-playbook -i localhost, tests/ansible/host_prepare.yaml
-ansible-playbook -i localhost, tests/ansible/host_prepare_rerun.yaml > "$workspace/rerun.log" 2>&1
+if ! ansible-playbook -i localhost, tests/ansible/host_prepare_rerun.yaml > "$workspace/rerun.log" 2>&1; then
+  cat "$workspace/rerun.log"
+  exit 1
+fi
 cat "$workspace/rerun.log"
 grep -Eq 'changed=0 .*unreachable=0 .*failed=0' "$workspace/rerun.log"
