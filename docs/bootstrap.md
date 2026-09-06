@@ -90,9 +90,19 @@ ansible-playbook --syntax-check site.yaml
 ansible-playbook validate.yaml
 ```
 
-The second command previews the contract entirely on the controller. `site.yaml` orders host preparation, package installation, API VIP, primary control plane, Cilium, joins, kubeconfig, and health. Host preparation is implemented; subsequent phases stop with explicit issue-specific errors until issues #59–#65 implement them. Syntax validation and contract preview do not indicate a bootstrapped cluster.
+The second command previews the contract entirely on the controller. `site.yaml` orders host preparation, package installation, API VIP, primary control plane, Cilium, joins, kubeconfig, and health. Host preparation and Kubernetes package installation are implemented; subsequent phases stop with explicit issue-specific errors until issues #60–#65 implement them. Syntax validation and contract preview do not indicate a bootstrapped cluster.
+
+## Kubernetes packages
+
+After `host_prepare`, `kubernetes_install.yaml` installs kubeadm, kubelet, and kubectl at the exact `spec.kubernetes.version` (`-1.1` APT revision) from the matching minor's `pkgs.k8s.io` repository. The embedded upstream signing key is restricted to this repository. Exact version pins and dpkg holds protect the three packages from unattended changes.
+
+The role verifies the prepared containerd 2.2.6 runtime and healthy CRI plugins, then checks all installed Kubernetes binary versions and CRI readiness. It owns `/etc/apt/keyrings/bareplane-kubernetes.asc`, `/etc/apt/sources.list.d/bareplane-kubernetes.sources`, `/etc/apt/preferences.d/bareplane-kubernetes`, `/etc/default/kubelet`, and `/etc/crictl.yaml`. Conflicting files, symlinks, untracked binaries, existing cluster state, and installed versions different from the requested pin are refused before any mutation. Changing the desired version is not an implicit upgrade or downgrade.
+
+Kubelet is enabled for boot, with the containerd endpoint and systemd cgroup driver, but the role does not force a service start before kubeadm has written its configuration. An already running kubelet's expected pre-bootstrap failure/restart state is tolerated. No kubeadm init/join, certificates, or Kubernetes API writes occur in this phase. The disposable VM test checks exact binary versions, package holds, version-change refusals, and zero changes on a repeat application.
 
 ## Host preparation
+
+The subsequent Kubernetes package phase also installs and holds `cri-tools` at the matching minor's `.0-1.1` revision, rather than relying on an implicit package dependency for `crictl`.
 
 After verifying the host identities and reviewing `bootstrap preflight`, the generated `host_prepare.yaml` prepares supported Linux machines with non-interactive sudo. It comments fstab swap entries (keeping a backup), disables active swap, persists and loads `overlay`/`br_netfilter`, and configures IPv4/IPv6 forwarding and bridge filtering. Enabled custom systemd swap units and zram generators require operator review first.
 

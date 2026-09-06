@@ -1,0 +1,41 @@
+---
+- name: Install and inspect Kubernetes packages in a disposable VM
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    bareplane_kubernetes_version: '1.36.4'
+  tasks:
+    - name: Require disposable VM context
+      ansible.builtin.assert:
+        that: lookup('ansible.builtin.env', 'BAREPLANE_DISPOSABLE_VM') == '1'
+    - name: Install the pinned toolchain
+      ansible.builtin.include_role:
+        name: kubernetes_install
+    - name: Check kubelet is enabled
+      ansible.builtin.command: systemctl is-enabled kubelet
+      changed_when: false
+      register: kubelet_enabled
+    - name: Require kubelet enablement
+      ansible.builtin.assert:
+        that: kubelet_enabled.stdout == 'enabled'
+    - name: Check packages are held
+      ansible.builtin.command: apt-mark showhold
+      changed_when: false
+      register: held_packages
+    - name: Require the package holds
+      ansible.builtin.assert:
+        that: item in held_packages.stdout_lines
+      loop: [kubelet, kubeadm, kubectl, cri-tools, containerd.io]
+    - name: Check that no cluster was created
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_config
+    - name: Require no cluster credentials
+      ansible.builtin.assert:
+        that: not admin_config.stat.exists
+    - name: Reject implicit version changes
+      ansible.builtin.include_tasks: kubernetes_reject_version.yaml
+      loop: ['1.36.3', '1.36.5', '1.35.8']
+      loop_control:
+        loop_var: rejected_version

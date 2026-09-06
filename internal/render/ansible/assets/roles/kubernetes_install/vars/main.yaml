@@ -1,0 +1,13 @@
+---
+bareplane_kubernetes_package_version: "{{ bareplane_kubernetes_version }}-1.1"
+bareplane_cri_tools_package_version: "{{ bareplane_kubernetes_version.split('.')[:2] | join('.') }}.0-1.1"
+bareplane_kubernetes_packages: [kubeadm, kubelet, kubectl]
+bareplane_kubernetes_files:
+  - path: /etc/apt/sources.list.d/bareplane-kubernetes.sources
+    template: kubernetes.sources.j2
+  - path: /etc/apt/preferences.d/bareplane-kubernetes
+    template: kubernetes.pin.j2
+  - path: /etc/default/kubelet
+    template: kubelet.j2
+  - path: /etc/crictl.yaml
+    template: crictl.yaml.j2

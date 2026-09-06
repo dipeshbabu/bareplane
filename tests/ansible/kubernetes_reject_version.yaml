@@ -1,0 +1,21 @@
+---
+- name: Reset refusal result
+  ansible.builtin.set_fact:
+    version_was_refused: false
+- name: Try changing the installed Kubernetes version
+  block:
+    - name: Invoke installation with a different desired version
+      ansible.builtin.include_role:
+        name: kubernetes_install
+      vars:
+        bareplane_kubernetes_version: "{{ rejected_version }}"
+  rescue:
+    - name: Require an explicit version refusal
+      ansible.builtin.assert:
+        that: (ansible_failed_result.results | selectattr('failed', 'defined') | selectattr('failed') | map(attribute='msg') | select('search', 'differs from the requested version') | list | length) == 3
+    - name: Record the version refusal
+      ansible.builtin.set_fact:
+        version_was_refused: true
+- name: Require the change was rejected
+  ansible.builtin.assert:
+    that: version_was_refused

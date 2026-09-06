@@ -1,0 +1,84 @@
+---
+- name: Install the embedded Kubernetes repository signing key
+  ansible.builtin.copy:
+    src: kubernetes.asc
+    dest: /etc/apt/keyrings/bareplane-kubernetes.asc
+    mode: '0644'
+    owner: root
+    group: root
+
+- name: Write deterministic Kubernetes toolchain configuration
+  ansible.builtin.template:
+    src: "{{ item.template }}"
+    dest: "{{ item.path }}"
+    mode: '0644'
+    owner: root
+    group: root
+  loop: "{{ bareplane_kubernetes_files }}"
+  register: bareplane_kubernetes_configuration
+
+- name: Install the exact Kubernetes package versions
+  ansible.builtin.apt:
+    name: "{{ (bareplane_kubernetes_packages | map('regex_replace', '$', '=' ~ bareplane_kubernetes_package_version) | list) + ['cri-tools=' ~ bareplane_cri_tools_package_version] }}"
+    state: present
+    update_cache: true
+    cache_valid_time: "{{ 0 if bareplane_kubernetes_configuration.results[0] is changed else 3600 }}"
+    policy_rc_d: 101
+    fail_on_autoremove: true
+    allow_downgrade: false
+    dpkg_options: force-confdef,force-confold
+  register: bareplane_kubernetes_installation
+
+- name: Hold the Kubernetes packages
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop: "{{ bareplane_kubernetes_packages + ['cri-tools'] }}"
+
+- name: Enable kubelet without forcing an unconfigured service to run
+  ansible.builtin.systemd_service:
+    name: kubelet
+    enabled: true
+    daemon_reload: "{{ bareplane_kubernetes_installation is changed }}"
+  when: not ansible_check_mode
+
+- name: Verify kubeadm version
+  ansible.builtin.command: kubeadm version -o short
+  changed_when: false
+  register: bareplane_installed_kubeadm
+  when: not ansible_check_mode
+
+- name: Verify kubelet version
+  ansible.builtin.command: kubelet --version
+  changed_when: false
+  register: bareplane_installed_kubelet
+  when: not ansible_check_mode
+
+- name: Verify kubectl client version without contacting an API server
+  ansible.builtin.command: kubectl version --client --output=json
+  changed_when: false
+  register: bareplane_installed_kubectl
+  when: not ansible_check_mode
+
+- name: Require exact matching toolchain versions
+  ansible.builtin.assert:
+    that:
+      - bareplane_installed_kubeadm.stdout == 'v' ~ bareplane_kubernetes_version
+      - bareplane_installed_kubelet.stdout == 'Kubernetes v' ~ bareplane_kubernetes_version
+      - (bareplane_installed_kubectl.stdout | from_json).clientVersion.gitVersion == 'v' ~ bareplane_kubernetes_version
+    quiet: true
+    fail_msg: Installed Kubernetes binaries differ from the requested pin.
+  when: not ansible_check_mode
+
+- name: Verify CRI access through the installed crictl configuration
+  ansible.builtin.command: crictl info
+  changed_when: false
+  register: bareplane_cri_info
+  when: not ansible_check_mode
+
+- name: Require a ready CRI runtime independently of CNI readiness
+  ansible.builtin.assert:
+    that: ((bareplane_cri_info.stdout | from_json).status.conditions | selectattr('type', 'equalto', 'RuntimeReady') | map(attribute='status') | list) == [true]
+    quiet: true
+    fail_msg: The CRI runtime is not ready for kubeadm.
+  when: not ansible_check_mode

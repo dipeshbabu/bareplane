@@ -1,0 +1,183 @@
+---
+- name: Collect platform facts
+  ansible.builtin.setup:
+    gather_subset: ['!all', min]
+
+- name: Require the supported Kubernetes and Linux matrix
+  ansible.builtin.assert:
+    that:
+      - bareplane_kubernetes_version is match('^1\.(35|36)\.(0|[1-9][0-9]*)$')
+      - ansible_facts.system == 'Linux'
+      - ansible_facts.service_mgr == 'systemd'
+      - ansible_facts.architecture in ['x86_64', 'aarch64']
+      - (ansible_facts.distribution == 'Debian' and ansible_facts.distribution_major_version in ['12', '13']) or (ansible_facts.distribution == 'Ubuntu' and ansible_facts.distribution_version in ['22.04', '24.04', '26.04'])
+    quiet: true
+    fail_msg: The Kubernetes toolchain requires the supported Linux platform and an exact supported version.
+
+- name: Read installed package versions
+  ansible.builtin.package_facts:
+    manager: apt
+
+- name: Refuse implicit Kubernetes upgrades and downgrades
+  ansible.builtin.assert:
+    that: item not in ansible_facts.packages or ansible_facts.packages[item][0].version == bareplane_kubernetes_package_version
+    quiet: true
+    fail_msg: "Installed {{ item }} differs from the requested version. Use an explicit upgrade/recovery workflow."
+  loop: "{{ bareplane_kubernetes_packages }}"
+
+- name: Require the prepared containerd runtime
+  ansible.builtin.assert:
+    that:
+      - "'containerd.io' in ansible_facts.packages"
+      - ansible_facts.packages['containerd.io'][0].version is match('^2\.2\.6-1~')
+    quiet: true
+    fail_msg: Complete host_prepare with the pinned containerd runtime first.
+
+- name: Refuse an incompatible installed CRI tool version
+  ansible.builtin.assert:
+    that: "'cri-tools' not in ansible_facts.packages or ansible_facts.packages['cri-tools'][0].version == bareplane_cri_tools_package_version"
+    quiet: true
+    fail_msg: Installed cri-tools differs from the pinned Kubernetes minor toolchain.
+
+- name: Locate crictl before installation
+  ansible.builtin.shell: command -v crictl || true
+  changed_when: false
+  check_mode: false
+  register: bareplane_crictl_binary
+
+- name: Refuse an untracked or shadowing crictl binary
+  ansible.builtin.assert:
+    that: bareplane_crictl_binary.stdout == '' or (bareplane_crictl_binary.stdout == '/usr/bin/crictl' and 'cri-tools' in ansible_facts.packages)
+    quiet: true
+    fail_msg: Existing crictl is outside the supported package installation.
+
+- name: Inspect required parent directories
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop: [/etc, /etc/apt, /etc/apt/keyrings, /etc/apt/sources.list.d, /etc/apt/preferences.d, /etc/default]
+  register: bareplane_kubernetes_parents
+
+- name: Reject missing or redirected configuration parents
+  ansible.builtin.assert:
+    that: item.stat.isdir | default(false) and not item.stat.islnk | default(false)
+    quiet: true
+    fail_msg: "Configuration parent {{ item.item }} must be a real directory; run host_prepare first."
+  loop: "{{ bareplane_kubernetes_parents.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Detect existing cluster state and kubelet service overrides
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop: [/var/lib/kubelet/config.yaml, /var/lib/kubelet/kubeadm-flags.env, /etc/systemd/system/kubelet.service, /etc/systemd/system/kubelet.service.d]
+  register: bareplane_kubernetes_state
+
+- name: Refuse existing cluster state or custom kubelet services
+  ansible.builtin.assert:
+    that: not item.stat.exists
+    quiet: true
+    fail_msg: "Existing state at {{ item.item }} requires an explicit lifecycle workflow."
+  loop: "{{ bareplane_kubernetes_state.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Inspect package-created Kubernetes directories
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop: [/etc/kubernetes, /var/lib/kubelet]
+  register: bareplane_kubernetes_directories
+
+- name: Refuse redirected Kubernetes state directories
+  ansible.builtin.assert:
+    that: not item.stat.exists or (item.stat.isdir | default(false) and not item.stat.islnk | default(false))
+    quiet: true
+    fail_msg: Kubernetes state directories must be real directories.
+  loop: "{{ bareplane_kubernetes_directories.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Inspect existing Kubernetes state entries
+  ansible.builtin.find:
+    paths: "{{ bareplane_kubernetes_directories.results | selectattr('stat.exists') | map(attribute='item') | list }}"
+    recurse: true
+    hidden: true
+    follow: false
+    file_type: any
+  register: bareplane_kubernetes_entries
+  when: bareplane_kubernetes_directories.results | selectattr('stat.exists') | list | length > 0
+
+- name: Allow only the package's empty pre-bootstrap directories and keep files
+  ansible.builtin.assert:
+    that: (item.path == '/etc/kubernetes/manifests' and item.isdir) or (item.path in ['/etc/kubernetes/manifests/.kubelet-keep', '/var/lib/kubelet/.kubelet-keep'] and item.isreg and item.size == 0)
+    quiet: true
+    fail_msg: "Existing Kubernetes state at {{ item.path }} requires a lifecycle workflow."
+  loop: "{{ bareplane_kubernetes_entries.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Inspect toolchain configuration ownership
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+    follow: false
+    checksum_algorithm: sha256
+  loop: "{{ bareplane_kubernetes_files }}"
+  register: bareplane_kubernetes_existing_files
+
+- name: Refuse unmanaged or modified toolchain configuration
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (item.stat.isreg | default(false) and not item.stat.islnk | default(false))
+      - not item.stat.exists or item.stat.checksum | default('') == (lookup('ansible.builtin.template', item.item.template) | hash('sha256'))
+    quiet: true
+    fail_msg: "Refusing to replace existing toolchain configuration at {{ item.item.path }}."
+  loop: "{{ bareplane_kubernetes_existing_files.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+
+- name: Inspect the Kubernetes signing key
+  ansible.builtin.stat:
+    path: /etc/apt/keyrings/bareplane-kubernetes.asc
+    follow: false
+    checksum_algorithm: sha256
+  register: bareplane_kubernetes_key
+
+- name: Refuse a conflicting signing key
+  ansible.builtin.assert:
+    that:
+      - not bareplane_kubernetes_key.stat.exists or (bareplane_kubernetes_key.stat.isreg | default(false) and not bareplane_kubernetes_key.stat.islnk | default(false))
+      - not bareplane_kubernetes_key.stat.exists or bareplane_kubernetes_key.stat.checksum | default('') == (lookup('ansible.builtin.file', 'kubernetes.asc', rstrip=false) | hash('sha256'))
+    quiet: true
+    fail_msg: Existing Kubernetes repository key differs from the embedded signing key.
+
+- name: Detect untracked Kubernetes binaries
+  ansible.builtin.shell: "command -v {{ item }} || true"
+  loop: "{{ bareplane_kubernetes_packages }}"
+  changed_when: false
+  check_mode: false
+  register: bareplane_kubernetes_binaries
+
+- name: Refuse untracked or shadowing Kubernetes binaries
+  ansible.builtin.assert:
+    that: item.stdout == '' or (item.stdout == '/usr/bin/' ~ item.item and item.item in ansible_facts.packages)
+    quiet: true
+    fail_msg: "The {{ item.item }} binary is outside the supported package installation."
+  loop: "{{ bareplane_kubernetes_binaries.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Verify containerd's server and CRI plugins before installing Kubernetes
+  ansible.builtin.command: ctr --timeout 10s plugins ls
+  changed_when: false
+  check_mode: false
+  register: bareplane_kubernetes_cri
+
+- name: Require healthy CRI image and runtime plugins
+  ansible.builtin.assert:
+    that:
+      - bareplane_kubernetes_cri.stdout is search('(?m)^io.containerd.cri.v1\s+images\s+.*\s+ok\s*$')
+      - bareplane_kubernetes_cri.stdout is search('(?m)^io.containerd.cri.v1\s+runtime\s+.*\s+ok\s*$')
+    quiet: true
+    fail_msg: The containerd CRI plugins must be healthy before Kubernetes installation.

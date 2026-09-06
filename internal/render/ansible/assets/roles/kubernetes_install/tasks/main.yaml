@@ -1,5 +1,6 @@
 ---
-- name: Refuse the unavailable kubernetes_install phase
-  ansible.builtin.fail:
-    msg: "Bootstrap phase kubernetes_install is not implemented; see Bareplane issue #59."
-  tags: [always]
+- name: Verify supported host and installed state before mutation
+  ansible.builtin.import_tasks: inspect.yaml
+
+- name: Install and verify the pinned Kubernetes toolchain
+  ansible.builtin.import_tasks: install.yaml
