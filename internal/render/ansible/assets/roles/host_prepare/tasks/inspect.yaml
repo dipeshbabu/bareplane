@@ -136,7 +136,7 @@
     quiet: true
 
 - name: Read configured swap units
-  ansible.builtin.command: systemctl list-unit-files --type=swap --no-legend --no-pager
+  ansible.builtin.command: systemctl list-unit-files --no-legend --no-pager
   changed_when: false
   check_mode: false
   register: bareplane_swap_units
@@ -146,4 +146,4 @@
     that: item.split()[1] in ['generated', 'masked', 'disabled']
     fail_msg: Custom enabled swap units must be disabled by the operator before preparation.
     quiet: true
-  loop: "{{ bareplane_swap_units.stdout_lines }}"
+  loop: "{{ bareplane_swap_units.stdout_lines | select('match', '\\S+\\.swap\\s') | list }}"
