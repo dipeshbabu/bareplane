@@ -100,9 +100,26 @@ class JoinStateTests(unittest.TestCase):
 
     def test_local_kubelet_must_authenticate_to_matching_uid(self):
         files = {join.CA: self.ca, join.STATE + '/join-intent': self.intent(), '/etc/kubernetes/kubelet.conf': b'private'}
-        with patch.object(join, 'checked_path', return_value=True), patch.object(join, 'read_file', side_effect=files.get), \
+        with patch.object(join, 'checked_path', return_value=True), patch.object(join, 'private_path'), patch.object(join, 'read_file', side_effect=files.get), \
                 patch.object(join, 'run', return_value=b'{"metadata":{"uid":"foreign"}}'), self.assertRaisesRegex(ValueError, 'different cluster'):
             join.inspect_node(self.identity, self.node)
+
+    def test_leftover_credentials_block_completion(self):
+        files = {join.CA: self.ca, join.STATE + '/join-intent': self.intent(),
+                 '/etc/kubernetes/kubelet.conf': b'private', join.STATE + '/join.yaml': b'secret'}
+        with patch.object(join, 'checked_path', return_value=True), patch.object(join, 'private_path'), \
+                patch.object(join, 'read_file', side_effect=files.get), self.assertRaisesRegex(ValueError, 'Temporary join credentials remain'):
+            join.inspect_node(self.identity, self.node)
+
+    def test_insecure_state_permissions_are_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'state'
+            path.write_bytes(b'private')
+            path.chmod(0o644)
+            with self.assertRaisesRegex(ValueError, 'owner-only'):
+                join.private_path(str(path))
+            path.chmod(0o600)
+            join.private_path(str(path))
 
     def test_symlink_ancestors_and_file_types_are_refused(self):
         with tempfile.TemporaryDirectory() as directory:

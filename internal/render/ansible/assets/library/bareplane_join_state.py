@@ -29,6 +29,13 @@ def checked_path(path, directory=False):
     return True
 
 
+def private_path(path, directory=False):
+    if checked_path(path, directory=directory):
+        info = os.lstat(path)
+        if info.st_mode & 0o077 or info.st_uid != os.geteuid():
+            raise ValueError('Bootstrap state must be owner-only and owned by the bootstrap account')
+
+
 def read_file(path):
     if not checked_path(path):
         return None
@@ -106,8 +113,12 @@ def inspect_node(identity, node):
                  '/var/lib/bareplane', STATE, '/var/lib/kubelet', '/var/lib/etcd']:
         checked_path(path, directory=True)
     for name in ['join-intent', 'join-complete', 'join.yaml', 'join-output']:
-        checked_path(STATE + '/' + name)
-    checked_path('/etc/kubernetes/.bareplane-init-complete')
+        private_path(STATE + '/' + name)
+    private_path('/var/lib/bareplane', directory=True)
+    private_path(STATE, directory=True)
+    initialized = read_file('/etc/kubernetes/.bareplane-init-complete')
+    if initialized is not None and (not identity['control_plane'] or initialized != (identity['cluster'] + '\n').encode()):
+        raise ValueError('Control-plane ownership marker differs from this cluster or role')
     kubelet = read_file('/etc/kubernetes/kubelet.conf') is not None
     state = decide(identity, node, read_file(STATE + '/join-intent'), read_file(STATE + '/join-complete'), read_file(CA), kubelet)
     if state == 'fresh':
@@ -129,6 +140,8 @@ def inspect_node(identity, node):
         if any(read_file(STATE + '/' + name) is not None for name in ['join.yaml', 'join-output']):
             raise ValueError('Stale join material requires explicit recovery')
     else:
+        if read_file(STATE + '/join.yaml') is not None:
+            raise ValueError('Temporary join credentials remain; explicit cleanup is required before completion')
         # Authenticate using this machine's kubelet credential, not just the
         # primary's admin credential, to prove it belongs to the same cluster.
         local = json.loads(run(['kubectl', '--kubeconfig', '/etc/kubernetes/kubelet.conf',

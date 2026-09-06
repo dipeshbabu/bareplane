@@ -29,6 +29,17 @@ def write_yaml(path, data, prefix=''):
     path.chmod(0o600)
 
 
+def boot_diagnostics(work, name):
+    # Only bounded boot/network errors from throwaway guests, never user-data
+    # or unrestricted console output (which can contain generated credentials).
+    console = work / name / 'console.log'
+    with console.open('rb') as stream:
+        data = stream.read(2 * 1024 * 1024).decode(errors='replace')
+    lines = [line for line in data.splitlines() if re.search(r'qemu:|error|warn|failed|netplan|network|cloud-init|sshd', line, re.I)]
+    for line in lines[-40:]:
+        print(re.sub(r'[A-Za-z0-9+/=_-]{48,}', '[redacted]', line)[:500], flush=True)
+
+
 def main():
     if os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('BAREPLANE_DISPOSABLE_VM') != '1':
         raise SystemExit('This mutating harness is restricted to disposable GitHub Actions runners')
@@ -99,14 +110,19 @@ def main():
                         '-o', 'StrictHostKeyChecking=yes', '-o', 'UserKnownHostsFile=' + str(known_hosts),
                         'root@' + hosts[name], command], **kwargs)
 
-        for name in names:
+        for index, name in enumerate(names):
             deadline = time.monotonic() + 240
             while True:
+                if guests[index].poll() is not None:
+                    boot_diagnostics(work, name)
+                    raise RuntimeError('QEMU exited before SSH readiness: ' + name)
                 try:
-                    ssh(name, 'cloud-init status --wait', stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    ssh(name, 'timeout 120s cloud-init status --wait', capture_output=True, text=True)
                     break
-                except subprocess.CalledProcessError:
+                except subprocess.CalledProcessError as error:
                     if time.monotonic() >= deadline:
+                        print((error.stderr or '')[-1000:], flush=True)
+                        boot_diagnostics(work, name)
                         raise RuntimeError('Guest did not become SSH-ready: ' + name) from None
                     time.sleep(3)
             ssh(name, 'apt-get update -qq && apt-get install -y -qq python3-apt sudo')
@@ -164,6 +180,9 @@ def main():
         certs = ssh(names[0], 'kubectl --kubeconfig /etc/kubernetes/admin.conf -n kube-system get secret kubeadm-certs --ignore-not-found -o name', capture_output=True, text=True)
         if certs.stdout.strip():
             raise RuntimeError('Uploaded join certificates were not cleaned up')
+        descriptions = ssh(names[0], 'kubectl --kubeconfig /etc/kubernetes/admin.conf -n kube-system get secrets -o jsonpath="{.items[*].data.description}"', capture_output=True, text=True)
+        if 'YmFyZXBsYW5lLW5vZGUtam9pbg==' in descriptions.stdout:
+            raise RuntimeError('A Bareplane node join token was not revoked')
         print('Three stacked-etcd control planes and one worker: joined, Ready, credentials cleaned, unchanged rerun.', flush=True)
     finally:
         for guest in guests:

@@ -101,6 +101,35 @@ func TestBundleVariableValuesAndSingleControlPlane(t *testing.T) {
 	}
 }
 
+func TestJoinPlaybookOrdersControlPlanesBeforeWorkers(t *testing.T) {
+	files, err := RenderBundle(bundleConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plays []struct {
+		Hosts  string `yaml:"hosts"`
+		Order  string `yaml:"order"`
+		Serial int    `yaml:"serial"`
+		Become bool   `yaml:"become"`
+		Fatal  bool   `yaml:"any_errors_fatal"`
+	}
+	if err := yaml.Unmarshal(files["join.yaml"], &plays); err != nil {
+		t.Fatal(err)
+	}
+	wantHosts := []string{"control_plane[0]", "control_plane[1:]", "workers", "control_plane[0]"}
+	if len(plays) != len(wantHosts) {
+		t.Fatalf("join phase has %d plays, want %d", len(plays), len(wantHosts))
+	}
+	for index, play := range plays {
+		if play.Hosts != wantHosts[index] || !play.Become || !play.Fatal {
+			t.Fatalf("unsafe join play %d: %+v", index, play)
+		}
+		if (index == 1 || index == 2) && (play.Order != "sorted" || play.Serial != 1) {
+			t.Fatalf("node join play %d is not deterministic and serial", index)
+		}
+	}
+}
+
 // CI requires Ansible explicitly. Ordinary Go tests stay offline with no tool prerequisite.
 func TestBundleAnsibleIntegration(t *testing.T) {
 	ansible, err := exec.LookPath("ansible-playbook")

@@ -19,8 +19,10 @@ prepares Linux; kubernetes_install adds pinned Kubernetes binaries; api_vip
 checks LAN address conflicts and installs the static Pod manifest;
 control_plane_init initializes the primary with private, configuration-bound state.
 Cilium installs the reviewed CNI chart and verifies primary networking.
+Join expands stacked-etcd control planes, then workers, with temporary credentials
+and configuration/CA-bound ownership checks; completed nodes are not rejoined.
 Other phase roles stop with a specific error until their issues
 are implemented (including in check mode).
-This bundle alone does not yet create Kubernetes. Do not interpret a successful
-syntax check or contract preview as a successful host/bootstrap operation.
+Guarded end-to-end CLI orchestration is still a separate phase. Do not interpret
+a successful syntax check or contract preview as a successful bootstrap operation.
 Only ansible.builtin is used; no external collections are required.
