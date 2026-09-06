@@ -1,0 +1,59 @@
+---
+- name: Refuse unmanaged VIP files inside a disposable VM
+  hosts: control_plane
+  connection: local
+  gather_facts: false
+  vars:
+    bareplane_cluster: lab
+    bareplane_primary_control_plane: localhost
+    bareplane_api_vip: 192.0.2.100
+    bareplane_api_port: 6443
+    bareplane_kube_vip_version: '1.2.3'
+  tasks:
+    - name: Require disposable VM context
+      ansible.builtin.assert:
+        that: lookup('ansible.builtin.env', 'BAREPLANE_DISPOSABLE_VM') == '1'
+    - name: Put a conflicting file at the static manifest path
+      ansible.builtin.copy:
+        dest: /etc/kubernetes/manifests/kube-vip.yaml
+        content: "unmanaged fixture\n"
+        mode: '0600'
+    - name: Try to replace the conflicting manifest
+      block:
+        - ansible.builtin.include_role:
+            name: api_vip
+      rescue:
+        - ansible.builtin.assert:
+            that: "'Existing VIP address or manifest' in ansible_failed_result.msg"
+        - ansible.builtin.set_fact:
+            vip_refused: true
+    - ansible.builtin.assert:
+        that: vip_refused | default(false)
+    - name: Verify the unmanaged file is preserved
+      ansible.builtin.slurp:
+        src: /etc/kubernetes/manifests/kube-vip.yaml
+      register: preserved_vip
+    - ansible.builtin.assert:
+        that: (preserved_vip.content | b64decode) == 'unmanaged fixture\n'
+    - name: Remove only the conflicting test fixture
+      ansible.builtin.file:
+        path: /etc/kubernetes/manifests/kube-vip.yaml
+        state: absent
+
+    - name: Refuse a VIP occupied by the unrelated test peer
+      block:
+        - ansible.builtin.include_role:
+            name: api_vip
+      rescue:
+        - ansible.builtin.assert:
+            that: "'VIP is claimed or being probed by an unrelated host' in ansible_failed_result.msg"
+        - ansible.builtin.set_fact:
+            vip_conflict_refused: true
+    - ansible.builtin.assert:
+        that: vip_conflict_refused | default(false)
+    - name: Confirm no manifest was written for an occupied VIP
+      ansible.builtin.stat:
+        path: /etc/kubernetes/manifests/kube-vip.yaml
+      register: refused_manifest
+    - ansible.builtin.assert:
+        that: not refused_manifest.stat.exists

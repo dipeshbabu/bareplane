@@ -1,5 +1,83 @@
 ---
-- name: Refuse the unavailable api_vip phase
-  ansible.builtin.fail:
-    msg: "Bootstrap phase api_vip is not implemented; see Bareplane issue #60."
-  tags: [always]
+- name: Discover the VIP interface from live preflight facts
+  bareplane_vip_probe:
+    vip: "{{ bareplane_api_vip }}"
+  register: bareplane_vip_facts
+
+- name: Inspect Kubernetes configuration directories
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop: [/etc/kubernetes, /etc/kubernetes/manifests]
+  register: bareplane_vip_directories
+
+- name: Require real Kubernetes directories from the toolchain installation
+  ansible.builtin.assert:
+    that: item.stat.isdir | default(false) and not item.stat.islnk | default(false)
+    fail_msg: Complete kubernetes_install first; manifest directories must not be symlinks.
+    quiet: true
+  loop: "{{ bareplane_vip_directories.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Inspect the initialization completion marker
+  ansible.builtin.stat:
+    path: /etc/kubernetes/.bareplane-init-complete
+    follow: false
+    checksum_algorithm: sha256
+  register: bareplane_vip_init_complete
+
+- name: Verify the completion marker belongs to this cluster
+  ansible.builtin.assert:
+    that:
+      - not bareplane_vip_init_complete.stat.exists or (bareplane_vip_init_complete.stat.isreg | default(false) and not bareplane_vip_init_complete.stat.islnk | default(false))
+      - not bareplane_vip_init_complete.stat.exists or bareplane_vip_init_complete.stat.checksum | default('') == ((bareplane_cluster ~ '\n') | hash('sha256'))
+    quiet: true
+    fail_msg: An initialization marker from another cluster or an unsafe path requires recovery.
+
+- name: Inspect existing Kubernetes credentials without reading them
+  ansible.builtin.stat:
+    path: /etc/kubernetes/admin.conf
+    follow: false
+  register: bareplane_vip_admin
+
+- name: Refuse an untracked existing Kubernetes cluster
+  ansible.builtin.assert:
+    that: not bareplane_vip_admin.stat.exists or bareplane_vip_init_complete.stat.exists
+    quiet: true
+    fail_msg: Existing Kubernetes credentials without a matching completion marker require recovery.
+
+- name: Select the kubeconfig appropriate to this bootstrap phase
+  ansible.builtin.set_fact:
+    bareplane_vip_kubeconfig: "{{ 'super-admin.conf' if inventory_hostname == bareplane_primary_control_plane and not bareplane_vip_init_complete.stat.exists else 'admin.conf' }}"
+
+- name: Inspect the existing VIP manifest
+  ansible.builtin.stat:
+    path: /etc/kubernetes/manifests/kube-vip.yaml
+    follow: false
+    checksum_algorithm: sha256
+  register: bareplane_vip_existing
+
+- name: Refuse unmanaged VIP configuration before probing or writing
+  ansible.builtin.assert:
+    that:
+      - not bareplane_vip_existing.stat.exists or (bareplane_vip_existing.stat.isreg | default(false) and not bareplane_vip_existing.stat.islnk | default(false))
+      - not bareplane_vip_existing.stat.exists or bareplane_vip_existing.stat.checksum | default('') == (lookup('ansible.builtin.template', 'kube-vip.yaml.j2') | hash('sha256'))
+      - not bareplane_vip_facts.owns_vip or bareplane_vip_existing.stat.exists
+    quiet: true
+    fail_msg: Existing VIP address or manifest is not managed by this Bareplane cluster; explicit recovery is required.
+
+- name: Check for VIP conflicts on every control-plane LAN
+  bareplane_vip_probe:
+    vip: "{{ bareplane_api_vip }}"
+    check_conflicts: true
+    owner_macs: "{{ groups['control_plane'] | map('extract', hostvars, 'bareplane_vip_facts') | selectattr('owns_vip') | map(attribute='mac') | list }}"
+    probe_macs: "{{ groups['control_plane'] | map('extract', hostvars, 'bareplane_vip_facts') | map(attribute='mac') | list }}"
+
+- name: Install the managed kube-vip static Pod manifest
+  ansible.builtin.template:
+    src: kube-vip.yaml.j2
+    dest: /etc/kubernetes/manifests/kube-vip.yaml
+    owner: root
+    group: root
+    mode: '0600'

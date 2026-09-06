@@ -10,6 +10,10 @@
 *.out
 coverage.out
 
+# Embedded Python module test caches
+__pycache__/
+*.py[cod]
+
 # Local configuration
 bareplane.local.yaml
 .env

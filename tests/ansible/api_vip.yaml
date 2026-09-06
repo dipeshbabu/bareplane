@@ -1,0 +1,30 @@
+---
+- name: Exercise VIP manifest installation inside a disposable VM
+  hosts: control_plane
+  connection: local
+  gather_facts: false
+  vars:
+    bareplane_cluster: lab
+    bareplane_primary_control_plane: localhost
+    bareplane_api_vip: 192.0.2.100
+    bareplane_api_port: 6443
+    bareplane_kube_vip_version: '1.2.3'
+  tasks:
+    - name: Require disposable VM context
+      ansible.builtin.assert:
+        that: lookup('ansible.builtin.env', 'BAREPLANE_DISPOSABLE_VM') == '1'
+    - name: Install the static manifest
+      ansible.builtin.include_role:
+        name: api_vip
+    - name: Read the resulting static Pod manifest
+      ansible.builtin.slurp:
+        src: /etc/kubernetes/manifests/kube-vip.yaml
+      register: vip_manifest
+    - name: Check version, endpoint, interface, and initial credential reference
+      ansible.builtin.assert:
+        that:
+          - (vip_manifest.content | b64decode | from_yaml).spec.containers[0].image == 'ghcr.io/kube-vip/kube-vip:v1.2.3'
+          - (vip_manifest.content | b64decode | from_yaml).spec.hostNetwork
+          - (vip_manifest.content | b64decode | from_yaml).spec.volumes[0].hostPath.path == '/etc/kubernetes/super-admin.conf'
+          - "'192.0.2.100' in (vip_manifest.content | b64decode)"
+          - bareplane_vip_facts.interface != 'lo'
