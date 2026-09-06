@@ -196,4 +196,4 @@ Future execution code must keep private-key contents out of logs, generated inve
 
 ## Current limitation
 
-Bareplane can validate bootstrap connectivity, render the inventory, verify local readiness, confirm that configured endpoints expose an SSH service, persist explicitly approved host identities, and authenticate for read-only remote readiness checks. It does not yet mutate hosts or run Kubernetes bootstrap. Those execution capabilities remain separate changes so connectivity and mutation boundaries stay reviewable.
+Bareplane can validate bootstrap connectivity, render the workspace, verify readiness, persist approved host identities, and authenticate for remote checks. The generated host-preparation playbook can configure Linux and containerd. Kubernetes initialization and guarded end-to-end CLI orchestration remain subsequent phases.

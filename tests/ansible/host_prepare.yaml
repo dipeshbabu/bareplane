@@ -40,7 +40,7 @@
       rescue:
         - name: Require the ownership refusal
           ansible.builtin.assert:
-            that: "'Refusing to replace existing configuration' in ansible_failed_result.msg"
+            that: (ansible_failed_result.results | selectattr('failed', 'defined') | selectattr('failed') | map(attribute='msg') | select('search', '^Refusing to replace existing configuration') | list | length) == 1
         - name: Read the preserved custom file
           ansible.builtin.slurp:
             src: /etc/containerd/config.toml
@@ -79,7 +79,7 @@
       rescue:
         - name: Require the symlink ownership refusal
           ansible.builtin.assert:
-            that: "'Refusing to replace existing configuration' in ansible_failed_result.msg"
+            that: (ansible_failed_result.results | selectattr('failed', 'defined') | selectattr('failed') | map(attribute='msg') | select('search', '^Refusing to replace existing configuration') | list | length) == 1
         - name: Read the preserved symlink target
           ansible.builtin.slurp:
             src: /tmp/bareplane-preserved.toml
