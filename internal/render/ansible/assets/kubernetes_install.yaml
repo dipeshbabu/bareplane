@@ -1,0 +1,9 @@
+---
+- name: kubernetes_install
+  hosts: "all"
+  gather_facts: false
+  any_errors_fatal: true
+  roles:
+    - role: contract
+      tags: [always]
+    - role: kubernetes_install

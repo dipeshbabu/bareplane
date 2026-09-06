@@ -26,7 +26,7 @@ const bootstrapUsage = `Usage:
   bareplane bootstrap preflight [path]
 
 Commands:
-  render     Render deterministic Ansible inventory without connecting to hosts
+  render     Render the deterministic Ansible bootstrap bundle offline
   doctor     Check local bootstrap inventory, SSH key, and tooling readiness
   check      Check remote TCP reachability and SSH service identification only
   trust      Review and explicitly trust remote SSH host identities
@@ -157,23 +157,21 @@ func runBootstrapRender(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	inventory, err := ansiblerender.RenderInventory(cfg)
+	files, err := ansiblerender.RenderBundle(cfg)
 	if err != nil {
 		fmt.Fprintf(stderr, "bootstrap render %s: %v\n", configPath, err)
 		return 1
 	}
 	destination := filepath.Join(filepath.Dir(filepath.Clean(configPath)), ".bareplane", "bootstrap")
-	if err := project.ReplaceGeneratedDirectory(destination, "bootstrap", map[string][]byte{
-		ansiblerender.InventoryFilename: inventory,
-	}); err != nil {
+	if err := project.ReplaceGeneratedTree(destination, "bootstrap", files); err != nil {
 		if errors.Is(err, project.ErrUnmanagedDestination) {
 			fmt.Fprintf(stderr, "bootstrap render %s: refusing to replace unmanaged output directory %s\n", configPath, destination)
 			return 1
 		}
-		fmt.Fprintf(stderr, "bootstrap render %s: write generated inventory: %v\n", configPath, err)
+		fmt.Fprintf(stderr, "bootstrap render %s: write generated bundle: %v\n", configPath, err)
 		return 1
 	}
 
-	fmt.Fprintf(stdout, "rendered bootstrap inventory to %s\n", destination)
+	fmt.Fprintf(stdout, "rendered bootstrap bundle to %s\n", destination)
 	return 0
 }

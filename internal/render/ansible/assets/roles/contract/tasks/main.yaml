@@ -1,0 +1,29 @@
+---
+- name: Check the cluster contract before any host operation
+  ansible.builtin.assert:
+    that:
+      - bareplane_bundle_version == 1
+      - bareplane_control_planes | length > 0
+      - bareplane_primary_control_plane == (bareplane_control_planes | first)
+      - bareplane_primary_control_plane == (groups['control_plane'] | first)
+      - (groups['control_plane'] | default([]) | sort) == bareplane_control_planes
+      - (groups['workers'] | default([]) | sort) == bareplane_workers
+      - bareplane_kube_proxy_replacement | bool
+      - bareplane_api_port == 6443
+      - bareplane_kubernetes_version | length > 0
+      - bareplane_cilium_version | length > 0
+      - bareplane_kube_vip_version | length > 0
+      - bareplane_api_vip | length > 0
+      - bareplane_pod_cidr | length > 0
+      - bareplane_service_cidr | length > 0
+      - "'StrictHostKeyChecking=yes' in ansible_ssh_common_args"
+      - "'UserKnownHostsFile=' in ansible_ssh_common_args"
+      - "'${' not in inventory_dir"
+    quiet: true
+    fail_msg: Invalid bootstrap bundle; rerun bareplane bootstrap render.
+  run_once: true
+
+- name: Preview the non-secret bootstrap inputs
+  ansible.builtin.debug:
+    msg: "{{ lookup('ansible.builtin.template', 'summary.j2') }}"
+  run_once: true

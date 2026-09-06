@@ -1,0 +1,27 @@
+---
+- name: Validate the bootstrap workspace
+  ansible.builtin.import_playbook: validate.yaml
+
+- name: host_prepare
+  ansible.builtin.import_playbook: host_prepare.yaml
+
+- name: kubernetes_install
+  ansible.builtin.import_playbook: kubernetes_install.yaml
+
+- name: api_vip
+  ansible.builtin.import_playbook: api_vip.yaml
+
+- name: control_plane_init
+  ansible.builtin.import_playbook: control_plane_init.yaml
+
+- name: cilium
+  ansible.builtin.import_playbook: cilium.yaml
+
+- name: join
+  ansible.builtin.import_playbook: join.yaml
+
+- name: kubeconfig
+  ansible.builtin.import_playbook: kubeconfig.yaml
+
+- name: health
+  ansible.builtin.import_playbook: health.yaml

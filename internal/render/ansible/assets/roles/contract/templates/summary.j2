@@ -1,0 +1,9 @@
+Cluster: {{ bareplane_cluster }}
+Kubernetes: {{ bareplane_kubernetes_version }} (kubeadm, stacked etcd)
+API: {{ bareplane_api_vip }}:{{ bareplane_api_port }} (kube-vip {{ bareplane_kube_vip_version }})
+CNI: Cilium {{ bareplane_cilium_version }} (bootstrap-owned, kube-proxy replacement)
+Pod CIDR: {{ bareplane_pod_cidr }}
+Service CIDR: {{ bareplane_service_cidr }}
+Primary control plane: {{ bareplane_primary_control_plane }}
+Control planes: {{ bareplane_control_planes | join(', ') }}
+Workers: {{ bareplane_workers | join(', ') }}

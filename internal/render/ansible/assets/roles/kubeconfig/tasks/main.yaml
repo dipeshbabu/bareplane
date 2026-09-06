@@ -1,0 +1,5 @@
+---
+- name: Refuse the unavailable kubeconfig phase
+  ansible.builtin.fail:
+    msg: "Bootstrap phase kubeconfig is not implemented; see Bareplane issue #64."
+  tags: [always]

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,6 +22,15 @@ type generatedMarker struct {
 }
 
 func ReplaceGeneratedDirectory(destination, kind string, files map[string][]byte) error {
+	return replaceGenerated(destination, kind, files, false)
+}
+
+// ReplaceGeneratedTree installs a staged tree of portable, relative slash paths.
+func ReplaceGeneratedTree(destination, kind string, files map[string][]byte) error {
+	return replaceGenerated(destination, kind, files, true)
+}
+
+func replaceGenerated(destination, kind string, files map[string][]byte, nested bool) error {
 	if strings.TrimSpace(destination) == "" {
 		return errors.New("generated destination is empty")
 	}
@@ -34,8 +44,13 @@ func ReplaceGeneratedDirectory(destination, kind string, files map[string][]byte
 		return fmt.Errorf("generated file set must not contain reserved marker %q", GeneratedMarkerFilename)
 	}
 	for name := range files {
-		if err := validateGeneratedFilename(name); err != nil {
+		if err := validateGeneratedPath(name, nested); err != nil {
 			return err
+		}
+		for parent := filepath.ToSlash(filepath.Dir(name)); parent != "."; parent = filepath.ToSlash(filepath.Dir(parent)) {
+			if _, exists := files[parent]; exists {
+				return fmt.Errorf("generated path %q is both a file and a directory", parent)
+			}
 		}
 	}
 
@@ -58,6 +73,17 @@ func ReplaceGeneratedDirectory(destination, kind string, files map[string][]byte
 		if !managed {
 			return fmt.Errorf("%w: %s", ErrUnmanagedDestination, destination)
 		}
+		if err := filepath.WalkDir(destination, func(path string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.Type()&os.ModeSymlink != 0 || (!entry.IsDir() && !entry.Type().IsRegular()) {
+				return fmt.Errorf("%w: generated path %s must not be a symlink or special file", ErrUnmanagedDestination, path)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("inspect generated destination: %w", err)
 	}
@@ -79,7 +105,11 @@ func ReplaceGeneratedDirectory(destination, kind string, files map[string][]byte
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		if err := writeExclusiveFile(filepath.Join(stage, name), files[name], 0o644); err != nil {
+		path := filepath.Join(stage, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return fmt.Errorf("create generated subdirectory: %w", err)
+		}
+		if err := writeExclusiveFile(path, files[name], 0o644); err != nil {
 			return fmt.Errorf("write generated file %q: %w", name, err)
 		}
 	}
@@ -155,10 +185,20 @@ func generatedDirectoryMatches(destination, kind string) (bool, error) {
 }
 
 func ensureRealDirectory(path string) error {
-	if err := os.MkdirAll(path, 0o755); err != nil {
-		return fmt.Errorf("create generated parent directory: %w", err)
+	path = filepath.Clean(path)
+	parent := filepath.Dir(path)
+	if parent != path {
+		if err := ensureRealDirectory(parent); err != nil {
+			return err
+		}
 	}
 	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		if err := os.Mkdir(path, 0o755); err != nil {
+			return fmt.Errorf("create generated parent directory: %w", err)
+		}
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("inspect generated parent directory: %w", err)
 	}
@@ -201,6 +241,27 @@ func validateGeneratedFilename(name string) error {
 	}
 	if strings.ContainsAny(name, "/\\\x00") {
 		return fmt.Errorf("generated filename %q contains a path separator or NUL", name)
+	}
+	return nil
+}
+
+func validateGeneratedPath(name string, nested bool) error {
+	if !nested {
+		return validateGeneratedFilename(name)
+	}
+	for _, part := range strings.Split(name, "/") {
+		if part == "" || part == "." || part == ".." || strings.HasSuffix(part, ".") || strings.EqualFold(part, GeneratedMarkerFilename) {
+			return fmt.Errorf("unsafe generated path %q", name)
+		}
+		for _, ch := range part {
+			if !(ch >= 'a' && ch <= 'z' || ch >= '0' && ch <= '9' || ch == '_' || ch == '-' || ch == '.') {
+				return fmt.Errorf("generated path %q must use lowercase portable path components", name)
+			}
+		}
+		stem := strings.SplitN(part, ".", 2)[0]
+		if stem == "con" || stem == "prn" || stem == "aux" || stem == "nul" || (len(stem) == 4 && (strings.HasPrefix(stem, "com") || strings.HasPrefix(stem, "lpt")) && stem[3] >= '0' && stem[3] <= '9') {
+			return fmt.Errorf("generated path %q uses a reserved device name", name)
+		}
 	}
 	return nil
 }

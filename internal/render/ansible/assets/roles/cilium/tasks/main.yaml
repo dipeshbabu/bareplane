@@ -1,0 +1,5 @@
+---
+- name: Refuse the unavailable cilium phase
+  ansible.builtin.fail:
+    msg: "Bootstrap phase cilium is not implemented; see Bareplane issue #62."
+  tags: [always]

@@ -41,6 +41,19 @@ jobs:
           go mod tidy
           git diff --exit-code -- go.mod go.sum
 
+      - name: Set up Python for Ansible validation
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pinned Ansible core
+        run: python -m pip install ansible-core==2.19.9
+
+      - name: Validate generated Ansible bundle
+        env:
+          BAREPLANE_TEST_ANSIBLE: '1'
+        run: go test -count=1 -v ./internal/render/ansible -run TestBundleAnsibleIntegration
+
       - name: Validate YAML syntax
         run: |
           ruby -e 'require "yaml"; Dir.glob("**/*.{yml,yaml}", File::FNM_DOTMATCH).reject { |f| f.include?("/.git/") }.each { |f| YAML.load_file(f, aliases: true) }'

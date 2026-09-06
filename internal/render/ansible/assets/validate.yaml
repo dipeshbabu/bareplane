@@ -1,0 +1,8 @@
+---
+- name: Validate the rendered bootstrap contract on the controller
+  hosts: all
+  gather_facts: false
+  any_errors_fatal: true
+  roles:
+    - role: contract
+      tags: [always]
