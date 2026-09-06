@@ -71,6 +71,7 @@ def main():
         names = ['lab-control-1', 'lab-control-2', 'lab-control-3', 'lab-worker-1']
         hosts = {name: '192.0.2.' + str(11 + index) for index, name in enumerate(names)}
         for index, (name, address) in enumerate(hosts.items()):
+            mac = f'52:54:00:12:34:{index + 1:02x}'
             vm = work / name
             vm.mkdir()
             host_key = vm / 'host_ed25519'
@@ -85,7 +86,7 @@ def main():
             ), '#cloud-config\n')
             write_yaml(vm / 'meta-data', {'instance-id': name, 'local-hostname': name})
             write_yaml(vm / 'network-config', dict(version=2, ethernets=dict(eth0=dict(
-                match=dict(name='en*'), **{'set-name': 'eth0'}, dhcp4=False,
+                match=dict(macaddress=mac), **{'set-name': 'eth0'}, dhcp4=False,
                 addresses=[address + '/24'], routes=[dict(to='default', via='192.0.2.1')],
                 nameservers=dict(addresses=['1.1.1.1', '8.8.8.8']),
             ))))
@@ -102,7 +103,7 @@ def main():
                 '-nographic', '-no-reboot', '-drive', f'file={vm / "disk.qcow2"},if=virtio,format=qcow2',
                 '-drive', f'file={vm / "seed.img"},if=virtio,format=raw',
                 '-netdev', f'tap,id=net0,ifname={tap},script=no,downscript=no',
-                '-device', f'virtio-net-pci,netdev=net0,mac=52:54:00:12:34:{index + 1:02x}',
+                '-device', f'virtio-net-pci,netdev=net0,mac={mac}',
             ], stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT))
 
         def ssh(name, command, **kwargs):
