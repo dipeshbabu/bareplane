@@ -10,6 +10,32 @@ permissions:
   contents: read
 
 jobs:
+  host-prepare:
+    name: Host preparation VM
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build the embedded bundle renderer
+        run: go build -o bin/bareplane ./cmd/bareplane
+      - name: Apply twice inside a disposable Debian 12 guest
+        uses: vmactions/debian-vm@389ba1da28ff5b440cba52db8e03fc2e08e2affa # v1.0.0
+        with:
+          release: '12'
+          mem: 4096
+          copyback: false
+          prepare: |
+            apt-get update
+            apt-get install -y python3-venv python3-apt sudo ca-certificates
+            python3 -m venv /opt/ansible
+            /opt/ansible/bin/python -m pip install ansible-core==2.19.9
+          run: |
+            BAREPLANE_DISPOSABLE_VM=1 sh tests/ansible/host_prepare_vm.sh
+
   quality:
     name: Quality
     runs-on: ubuntu-latest

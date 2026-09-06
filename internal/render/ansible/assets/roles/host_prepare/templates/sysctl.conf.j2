@@ -1,0 +1,4 @@
+# Managed by Bareplane host_prepare v1.
+{% for setting in bareplane_sysctls %}
+{{ setting.name }} = {{ setting.value }}
+{% endfor %}

@@ -90,7 +90,17 @@ ansible-playbook --syntax-check site.yaml
 ansible-playbook validate.yaml
 ```
 
-The second command previews the contract entirely on the controller. `site.yaml` orders host preparation, package installation, API VIP, primary control plane, Cilium, joins, kubeconfig, and health. These phase entrypoints currently stop with explicit issue-specific errors until issues #58–#65 implement them. Syntax validation and contract preview do not indicate a bootstrapped cluster.
+The second command previews the contract entirely on the controller. `site.yaml` orders host preparation, package installation, API VIP, primary control plane, Cilium, joins, kubeconfig, and health. Host preparation is implemented; subsequent phases stop with explicit issue-specific errors until issues #59–#65 implement them. Syntax validation and contract preview do not indicate a bootstrapped cluster.
+
+## Host preparation
+
+After verifying the host identities and reviewing `bootstrap preflight`, the generated `host_prepare.yaml` prepares supported Linux machines with non-interactive sudo. It comments fstab swap entries (keeping a backup), disables active swap, persists and loads `overlay`/`br_netfilter`, and configures IPv4/IPv6 forwarding and bridge filtering. Enabled custom systemd swap units and zram generators require operator review first.
+
+The role installs the exact `containerd.io` 2.2.6 package revision 1 for the host distribution from Docker's authenticated APT repository. The Docker release signing key is embedded in the binary, and only the Bareplane repository uses it. APT version pinning and a dpkg hold prevent unattended runtime upgrades. The deterministic containerd v3 configuration enables CRI and systemd cgroups; the role verifies the running server and CRI plugins after startup.
+
+Owned files are `/etc/containerd/config.toml`, `/etc/modules-load.d/bareplane.conf`, `/etc/sysctl.d/90-bareplane.conf`, `/etc/apt/keyrings/bareplane-docker.asc`, `/etc/apt/sources.list.d/bareplane-containerd.sources`, and `/etc/apt/preferences.d/bareplane-containerd`. Existing files must exactly match the generated content before the role will proceed. Symlinked paths, custom runtime services, alternative runtime packages, existing Kubernetes/CNI state, and mismatched containerd versions block preparation before any mutation. Inspect and back up conflicting state before manually removing it or choosing an explicit lifecycle recovery path; the role has no force/adoption switch.
+
+The supported hosts are Debian 12/13 and Ubuntu 22.04/24.04/26.04 on amd64/arm64 with systemd and kernel 5.10 or newer. Python 3 with the distribution's `python3-apt` bindings is required. Linux VM CI exercises unmanaged-file refusal, containerd health, and an unchanged second application. Real Proxmox acceptance remains part of the release gate. The role does not install kubeadm, initialize/join Kubernetes, or configure registry mirrors.
 
 ## Local bootstrap doctor
 
@@ -186,4 +196,4 @@ Future execution code must keep private-key contents out of logs, generated inve
 
 ## Current limitation
 
-Bareplane can validate bootstrap connectivity, render the inventory, verify local readiness, confirm that configured endpoints expose an SSH service, persist explicitly approved host identities, and authenticate for read-only remote readiness checks. It does not yet mutate hosts or run Kubernetes bootstrap. Those execution capabilities remain separate changes so connectivity and mutation boundaries stay reviewable.
+Bareplane can validate bootstrap connectivity, render the workspace, verify readiness, persist approved host identities, and authenticate for remote checks. The generated host-preparation playbook can configure Linux and containerd. Kubernetes initialization and guarded end-to-end CLI orchestration remain subsequent phases.

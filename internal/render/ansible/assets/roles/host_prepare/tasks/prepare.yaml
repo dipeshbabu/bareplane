@@ -1,0 +1,135 @@
+---
+- name: Install distribution prerequisites from authenticated APT sources
+  ansible.builtin.apt:
+    name: [ca-certificates, kmod]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+    fail_on_autoremove: true
+
+- name: Create owned configuration directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop: "{{ bareplane_host_directories }}"
+
+- name: Install the embedded Docker release signing key
+  ansible.builtin.copy:
+    src: docker.asc
+    dest: /etc/apt/keyrings/bareplane-docker.asc
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Write deterministic host configuration
+  ansible.builtin.template:
+    src: "{{ item.template }}"
+    dest: "{{ item.path }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop: "{{ bareplane_managed_host_files }}"
+  register: bareplane_host_configuration
+
+- name: Comment active fstab swap entries while preserving the original line
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^([ \t]*[^#\s]\S*[ \t]+\S+[ \t]+swap(?:[ \t]+[^\n]*)?)$'
+    replace: '# Bareplane disabled swap: \1'
+    backup: true
+
+- name: Disable active swap
+  ansible.builtin.command: swapoff -a
+  when: ansible_facts.swaptotal_mb | int > 0
+  changed_when: true
+
+- name: Inspect required kernel modules
+  ansible.builtin.stat:
+    path: "/sys/module/{{ item }}"
+  loop: [overlay, br_netfilter]
+  register: bareplane_modules
+
+- name: Load missing kernel modules
+  ansible.builtin.command:
+    argv: [modprobe, "{{ item.item }}"]
+  loop: "{{ bareplane_modules.results }}"
+  when: not item.stat.exists
+  changed_when: true
+
+- name: Read Kubernetes sysctls
+  ansible.builtin.command:
+    argv: [sysctl, -n, "{{ item.name }}"]
+  loop: "{{ bareplane_sysctls }}"
+  changed_when: false
+  check_mode: false
+  register: bareplane_live_sysctls
+
+- name: Set Kubernetes sysctls only when needed
+  ansible.builtin.command:
+    argv: [sysctl, -w, "{{ item.item.name }}={{ item.item.value }}"]
+  loop: "{{ bareplane_live_sysctls.results }}"
+  when: item.stdout != item.item.value
+  changed_when: true
+
+- name: Install the exact pinned containerd package without auto-starting services
+  ansible.builtin.apt:
+    name: "containerd.io={{ bareplane_containerd_package }}"
+    state: present
+    update_cache: true
+    cache_valid_time: "{{ 0 if bareplane_host_configuration.results[3] is changed else 3600 }}"
+    policy_rc_d: 101
+    fail_on_autoremove: true
+    allow_downgrade: false
+    dpkg_options: force-confdef,force-confold
+  register: bareplane_containerd_install
+
+- name: Hold containerd against unattended version changes
+  ansible.builtin.dpkg_selections:
+    name: containerd.io
+    selection: hold
+
+- name: Validate the installed containerd configuration
+  ansible.builtin.command: containerd --config /etc/containerd/config.toml config dump
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Enable and start the configured containerd service
+  ansible.builtin.systemd_service:
+    name: containerd
+    enabled: true
+    daemon_reload: "{{ bareplane_containerd_install is changed }}"
+    state: "{{ 'restarted' if bareplane_host_configuration.results[0] is changed or bareplane_containerd_install is changed else 'started' }}"
+  when: not ansible_check_mode
+
+- name: Verify containerd server responds within the deadline
+  ansible.builtin.command: ctr --timeout 10s version
+  register: bareplane_containerd_health
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Verify the pinned client and server release
+  ansible.builtin.assert:
+    that:
+      - bareplane_containerd_health.stdout is search('(?m)^Server:')
+      - "(bareplane_containerd_health.stdout | regex_findall('(?m)^\\s*Version:\\s+v?2\\.2\\.6\\s*$') | length) == 2"
+    fail_msg: The containerd server did not report the pinned release.
+    quiet: true
+  when: not ansible_check_mode
+
+- name: Verify both CRI plugins loaded
+  ansible.builtin.command: ctr --timeout 10s plugins ls
+  register: bareplane_cri_plugins
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Require healthy CRI image and runtime plugins
+  ansible.builtin.assert:
+    that:
+      - bareplane_cri_plugins.stdout is search('(?m)^io.containerd.cri.v1\s+images\s+.*\s+ok\s*$')
+      - bareplane_cri_plugins.stdout is search('(?m)^io.containerd.cri.v1\s+runtime\s+.*\s+ok\s*$')
+    fail_msg: Containerd CRI plugins are not healthy.
+    quiet: true
+  when: not ansible_check_mode

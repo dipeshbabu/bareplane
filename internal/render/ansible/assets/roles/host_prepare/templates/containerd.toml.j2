@@ -1,0 +1,19 @@
+# Managed by Bareplane host_prepare v1. Local modifications block reapplication.
+version = 3
+root = "/var/lib/containerd"
+state = "/run/containerd"
+disabled_plugins = []
+imports = []
+
+[grpc]
+  address = "/run/containerd/containerd.sock"
+
+[plugins.'io.containerd.cri.v1.runtime'.containerd]
+  default_runtime_name = "runc"
+  [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runc]
+    runtime_type = "io.containerd.runc.v2"
+    [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runc.options]
+      SystemdCgroup = true
+
+[plugins.'io.containerd.cri.v1.images']
+  snapshotter = "overlayfs"

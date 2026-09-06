@@ -1,0 +1,133 @@
+---
+- name: Exercise host preparation inside a disposable VM
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require explicit disposable VM test context
+      ansible.builtin.assert:
+        that: lookup('ansible.builtin.env', 'BAREPLANE_DISPOSABLE_VM') == '1'
+        fail_msg: This test changes system configuration and must run only inside a disposable CI VM.
+
+    - name: Allocate a swap fixture in the guest
+      ansible.builtin.command: fallocate -l 64M /bareplane-test.swap
+      changed_when: true
+    - name: Restrict the swap fixture permissions
+      ansible.builtin.file:
+        path: /bareplane-test.swap
+        mode: '0600'
+    - name: Initialize the guest swap fixture
+      ansible.builtin.command: mkswap /bareplane-test.swap
+      changed_when: true
+    - name: Activate the guest swap fixture
+      ansible.builtin.command: swapon /bareplane-test.swap
+      changed_when: true
+    - name: Persist the swap fixture for the role to disable
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        line: /bareplane-test.swap none swap sw 0 0
+
+    - name: Check refusal of custom containerd configuration
+      block:
+        - name: Create a custom configuration
+          ansible.builtin.copy:
+            dest: /etc/containerd/config.toml
+            content: "# An unrelated runtime configuration\nversion = 3\n"
+            mode: '0644'
+        - name: Try host preparation with a conflicting file
+          ansible.builtin.include_role:
+            name: host_prepare
+      rescue:
+        - name: Require the ownership refusal
+          ansible.builtin.assert:
+            that: (ansible_failed_result.results | selectattr('failed', 'defined') | selectattr('failed') | map(attribute='msg') | select('search', '^Refusing to replace existing configuration') | list | length) == 1
+        - name: Read the preserved custom file
+          ansible.builtin.slurp:
+            src: /etc/containerd/config.toml
+          register: custom_config
+        - name: Confirm preservation
+          ansible.builtin.assert:
+            that: (custom_config.content | b64decode) == '# An unrelated runtime configuration\nversion = 3\n'
+        - name: Record expected refusal
+          ansible.builtin.set_fact:
+            refused_custom_config: true
+
+    - name: Require that custom configuration was rejected
+      ansible.builtin.assert:
+        that: refused_custom_config | default(false)
+
+    - name: Remove only the test fixture configuration
+      ansible.builtin.file:
+        path: /etc/containerd/config.toml
+        state: absent
+
+    - name: Test symlink refusal
+      block:
+        - name: Write a fixture outside the runtime directory
+          ansible.builtin.copy:
+            dest: /tmp/bareplane-preserved.toml
+            content: "preserve this target\n"
+            mode: '0600'
+        - name: Place a symlink at the runtime configuration path
+          ansible.builtin.file:
+            src: /tmp/bareplane-preserved.toml
+            dest: /etc/containerd/config.toml
+            state: link
+        - name: Try preparation with a symlinked configuration
+          ansible.builtin.include_role:
+            name: host_prepare
+      rescue:
+        - name: Require the symlink ownership refusal
+          ansible.builtin.assert:
+            that: (ansible_failed_result.results | selectattr('failed', 'defined') | selectattr('failed') | map(attribute='msg') | select('search', '^Refusing to replace existing configuration') | list | length) == 1
+        - name: Read the preserved symlink target
+          ansible.builtin.slurp:
+            src: /tmp/bareplane-preserved.toml
+          register: preserved_target
+        - name: Require target preservation
+          ansible.builtin.assert:
+            that: (preserved_target.content | b64decode) == 'preserve this target\n'
+        - name: Record expected symlink refusal
+          ansible.builtin.set_fact:
+            refused_symlink: true
+
+    - name: Require the symlink was rejected
+      ansible.builtin.assert:
+        that: refused_symlink | default(false)
+
+    - name: Remove only the fixture symlink
+      ansible.builtin.file:
+        path: /etc/containerd/config.toml
+        state: absent
+
+    - name: Prepare the clean VM
+      ansible.builtin.include_role:
+        name: host_prepare
+
+    - name: Read managed containerd configuration
+      ansible.builtin.slurp:
+        src: /etc/containerd/config.toml
+      register: managed_config
+
+    - name: Verify systemd cgroups and CRI enablement
+      ansible.builtin.assert:
+        that:
+          - "'SystemdCgroup = true' in (managed_config.content | b64decode)"
+          - "'disabled_plugins = []' in (managed_config.content | b64decode)"
+
+    - name: Read active swap
+      ansible.builtin.command: swapon --show --noheadings
+      changed_when: false
+      register: active_swap
+
+    - name: Require swap is disabled
+      ansible.builtin.assert:
+        that: active_swap.stdout == ''
+
+    - name: Verify swap will stay disabled after reboot
+      ansible.builtin.slurp:
+        src: /etc/fstab
+      register: fixture_fstab
+    - name: Require the original swap line is preserved as a comment
+      ansible.builtin.assert:
+        that: "'# Bareplane disabled swap: /bareplane-test.swap none swap sw 0 0' in (fixture_fstab.content | b64decode)"
