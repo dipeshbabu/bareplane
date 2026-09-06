@@ -1,0 +1,9 @@
+---
+- name: host_prepare
+  hosts: "all"
+  gather_facts: false
+  any_errors_fatal: true
+  roles:
+    - role: contract
+      tags: [always]
+    - role: host_prepare

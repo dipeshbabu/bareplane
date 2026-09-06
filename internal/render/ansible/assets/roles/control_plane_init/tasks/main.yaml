@@ -1,0 +1,5 @@
+---
+- name: Refuse the unavailable control_plane_init phase
+  ansible.builtin.fail:
+    msg: "Bootstrap phase control_plane_init is not implemented; see Bareplane issue #61."
+  tags: [always]

@@ -1,0 +1,5 @@
+---
+- name: Refuse the unavailable health phase
+  ansible.builtin.fail:
+    msg: "Bootstrap phase health is not implemented; see Bareplane issue #65."
+  tags: [always]

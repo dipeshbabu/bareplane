@@ -1,0 +1,5 @@
+---
+- name: Refuse the unavailable kubernetes_install phase
+  ansible.builtin.fail:
+    msg: "Bootstrap phase kubernetes_install is not implemented; see Bareplane issue #59."
+  tags: [always]

@@ -1,0 +1,5 @@
+---
+- name: Refuse the unavailable api_vip phase
+  ansible.builtin.fail:
+    msg: "Bootstrap phase api_vip is not implemented; see Bareplane issue #60."
+  tags: [always]

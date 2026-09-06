@@ -37,26 +37,60 @@ The host-map keys are deterministic Bareplane machine names. They must exactly m
 
 `Config.ValidateKubernetesBootstrap()` builds on this SSH contract and additionally requires the complete versioned Kubernetes settings, compatible pinned component versions, safe non-overlapping network ranges, at least one control-plane machine, and the v0.1 Cilium kube-proxy replacement mode. See [kubernetes.md](kubernetes.md) for that contract.
 
-## Render the inventory
+## Render the bootstrap bundle
 
-Once the bootstrap configuration is complete:
+Once both the SSH and Kubernetes bootstrap configurations are complete:
 
 ```bash
 bareplane bootstrap render
 ```
 
-Bareplane writes a managed inventory beside the project configuration:
+Bareplane writes an embedded Ansible workspace beside the project configuration:
 
 ```text
 .bareplane/
   bootstrap/
     .bareplane-generated.json
     inventory.yaml
+    ansible.cfg
+    site.yaml
+    validate.yaml
+    host_prepare.yaml
+    kubernetes_install.yaml
+    api_vip.yaml
+    control_plane_init.yaml
+    cilium.yaml
+    join.yaml
+    kubeconfig.yaml
+    health.yaml
+    group_vars/all/
+      cluster.yaml
+      connection.yaml
+    roles/
+      contract/
+        tasks/main.yaml
+        templates/summary.j2
+      ... phase roles ...
 ```
 
 The inventory contains deterministic `control_plane` and `workers` groups. Each machine includes `ansible_host`, `ansible_user`, `ansible_port`, and non-secret Bareplane metadata such as its node group, role, provider target when configured, GPU intent, CPU, memory, and disk capacity.
 
-The inventory renderer is offline. It performs no SSH connection and does not run Ansible. Re-rendering safely replaces only a directory that carries Bareplane's matching generation marker; an unrelated or symlinked destination is refused.
+`group_vars/all/cluster.yaml` contains only explicit non-secret inputs: the cluster name, pinned component versions, API VIP/port, pod/service CIDRs, Cilium kube-proxy replacement, sorted machine groups, and a deterministic primary control plane. CPU, memory, disk, GPU intent, provider placement, and SSH endpoints stay in inventory host variables. Credentials, provider API endpoints, and SSH private-key references are excluded from every generated file.
+
+The renderer is offline and requires neither Ansible, a reachable host, nor an existing key or trust file. It uses `ValidateKubernetesBootstrap()`; the lower-level inventory renderer still accepts SSH-only configuration. Re-rendering replaces only a directory with Bareplane's matching generation marker and rejects symlinks anywhere in its generated tree or parent path. The persistent `.bareplane/state/bootstrap/known_hosts` survives re-rendering.
+
+The generated connection variables bind strict host-key verification to the inventory's own project known_hosts file. Paths with spaces, quotes, and OpenSSH percent tokens are escaped; `${...}` in a controller path is rejected because OpenSSH expands environment references. Future execution must set the generated `ANSIBLE_CONFIG` explicitly, supply the validated key through `--private-key`, and control environment/extra-variable overrides. Ansible controllers run on Linux/WSL.
+
+CI installs `ansible-core==2.19.9` and checks the generated playbooks and their static role imports. Only `ansible.builtin` content is used, with no external collection downloads. To inspect a generated bundle locally:
+
+```bash
+cd .bareplane/bootstrap
+export ANSIBLE_CONFIG="$PWD/ansible.cfg"
+ansible-playbook --syntax-check site.yaml
+ansible-playbook validate.yaml
+```
+
+The second command previews the contract entirely on the controller. `site.yaml` orders host preparation, package installation, API VIP, primary control plane, Cilium, joins, kubeconfig, and health. These phase entrypoints currently stop with explicit issue-specific errors until issues #58–#65 implement them. Syntax validation and contract preview do not indicate a bootstrapped cluster.
 
 ## Local bootstrap doctor
 

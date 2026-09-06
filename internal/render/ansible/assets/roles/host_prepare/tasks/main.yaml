@@ -1,0 +1,5 @@
+---
+- name: Refuse the unavailable host_prepare phase
+  ansible.builtin.fail:
+    msg: "Bootstrap phase host_prepare is not implemented; see Bareplane issue #58."
+  tags: [always]

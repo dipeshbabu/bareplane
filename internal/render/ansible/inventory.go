@@ -3,6 +3,7 @@ package ansible
 import (
 	"bytes"
 	"fmt"
+	"sort"
 	"strconv"
 
 	"github.com/dipeshbabu/bareplane/internal/config"
@@ -22,6 +23,7 @@ func RenderInventory(cfg config.Config) ([]byte, error) {
 	}
 
 	ssh := cfg.Spec.Bootstrap.SSH
+	sort.Slice(topo.Machines, func(i, j int) bool { return topo.Machines[i].Name < topo.Machines[j].Name })
 	root := mappingNode()
 	all := mappingNode()
 	children := mappingNode()

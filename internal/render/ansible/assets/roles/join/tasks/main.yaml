@@ -1,0 +1,5 @@
+---
+- name: Refuse the unavailable join phase
+  ansible.builtin.fail:
+    msg: "Bootstrap phase join is not implemented; see Bareplane issue #63."
+  tags: [always]

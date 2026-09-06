@@ -1,0 +1,9 @@
+---
+- name: api_vip
+  hosts: "control_plane"
+  gather_facts: false
+  any_errors_fatal: true
+  roles:
+    - role: contract
+      tags: [always]
+    - role: api_vip
