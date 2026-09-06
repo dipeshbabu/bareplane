@@ -1,0 +1,11 @@
+---
+- name: Repeat the role in a disposable VM to check idempotency
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  pre_tasks:
+    - name: Require explicit disposable VM test context
+      ansible.builtin.assert:
+        that: lookup('ansible.builtin.env', 'BAREPLANE_DISPOSABLE_VM') == '1'
+  roles:
+    - host_prepare

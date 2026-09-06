@@ -183,12 +183,12 @@ func TestBundleAnsibleIntegration(t *testing.T) {
 			t.Fatalf("SSH arguments escaped incorrectly: %#v, want %#v", args, wantArgs)
 		}
 		for _, check := range []bool{false, true} {
-			args := []string{"site.yaml"}
+			args := []string{"health.yaml"}
 			if check {
 				args = append(args, "--check")
 			}
 			out := run(true, args...)
-			if !strings.Contains(out, "issue #58") || strings.Contains(out, "UNREACHABLE") {
+			if !strings.Contains(out, "issue #65") || strings.Contains(out, "UNREACHABLE") {
 				t.Fatalf("unavailable phase failed incorrectly: %s", out)
 			}
 		}

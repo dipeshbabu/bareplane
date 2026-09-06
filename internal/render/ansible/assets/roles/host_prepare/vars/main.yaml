@@ -1,0 +1,42 @@
+---
+bareplane_containerd_release: '2.2.6'
+bareplane_distribution_version: "{{ ansible_facts.distribution_major_version if ansible_facts.distribution == 'Debian' else ansible_facts.distribution_version }}"
+bareplane_containerd_package: "2.2.6-1~{{ ansible_facts.distribution | lower }}.{{ bareplane_distribution_version }}~{{ ansible_facts.distribution_release }}"
+bareplane_apt_architectures:
+  x86_64: amd64
+  aarch64: arm64
+bareplane_host_releases:
+  Debian:
+    '12': bookworm
+    '13': trixie
+  Ubuntu:
+    '22.04': jammy
+    '24.04': noble
+    '26.04': resolute
+bareplane_host_directories:
+  - /etc/containerd
+  - /etc/modules-load.d
+  - /etc/sysctl.d
+  - /etc/apt/keyrings
+  - /etc/apt/sources.list.d
+  - /etc/apt/preferences.d
+bareplane_managed_host_files:
+  - path: /etc/containerd/config.toml
+    template: containerd.toml.j2
+  - path: /etc/modules-load.d/bareplane.conf
+    template: modules.conf.j2
+  - path: /etc/sysctl.d/90-bareplane.conf
+    template: sysctl.conf.j2
+  - path: /etc/apt/sources.list.d/bareplane-containerd.sources
+    template: containerd.sources.j2
+  - path: /etc/apt/preferences.d/bareplane-containerd
+    template: containerd.pin.j2
+bareplane_sysctls:
+  - name: net.ipv4.ip_forward
+    value: '1'
+  - name: net.ipv6.conf.all.forwarding
+    value: '1'
+  - name: net.bridge.bridge-nf-call-iptables
+    value: '1'
+  - name: net.bridge.bridge-nf-call-ip6tables
+    value: '1'

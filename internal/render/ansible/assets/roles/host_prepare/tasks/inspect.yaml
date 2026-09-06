@@ -1,0 +1,149 @@
+---
+- name: Read the supported host facts
+  ansible.builtin.setup:
+    gather_subset: ['!all', min, hardware]
+
+- name: Require a supported systemd host
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.system == 'Linux'
+      - ansible_facts.service_mgr == 'systemd'
+      - ansible_facts.architecture in bareplane_apt_architectures
+      - ansible_facts.distribution in bareplane_host_releases
+      - bareplane_distribution_version in bareplane_host_releases[ansible_facts.distribution]
+      - ansible_facts.distribution_release == bareplane_host_releases[ansible_facts.distribution][bareplane_distribution_version]
+      - ansible_facts.kernel is version('5.10', '>=')
+    fail_msg: Host preparation requires the documented Debian/Ubuntu, systemd, kernel, and architecture matrix.
+    quiet: true
+
+- name: Inspect parent directories without following links
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop: "{{ ['/etc', '/etc/apt'] + bareplane_host_directories }}"
+  register: bareplane_host_dirs
+
+- name: Reject redirected host configuration directories
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (item.stat.isdir | default(false) and not item.stat.islnk | default(false))
+    fail_msg: "Host configuration directory {{ item.item }} is not a real directory."
+    quiet: true
+  loop: "{{ bareplane_host_dirs.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Read existing managed configuration checksums
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+    follow: false
+    checksum_algorithm: sha256
+  loop: "{{ bareplane_managed_host_files }}"
+  register: bareplane_host_files
+
+- name: Refuse unmanaged or modified configuration before making changes
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (item.stat.isreg | default(false) and not item.stat.islnk | default(false))
+      - not item.stat.exists or item.stat.checksum | default('') == (lookup('ansible.builtin.template', item.item.template) | hash('sha256'))
+    fail_msg: "Refusing to replace existing configuration at {{ item.item.path }}; inspect it and use the documented recovery procedure."
+    quiet: true
+  loop: "{{ bareplane_host_files.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+
+- name: Inspect the pinned repository key
+  ansible.builtin.stat:
+    path: /etc/apt/keyrings/bareplane-docker.asc
+    follow: false
+    checksum_algorithm: sha256
+  register: bareplane_repository_key
+
+- name: Refuse a conflicting repository key
+  ansible.builtin.assert:
+    that:
+      - not bareplane_repository_key.stat.exists or (bareplane_repository_key.stat.isreg | default(false) and not bareplane_repository_key.stat.islnk | default(false))
+      - not bareplane_repository_key.stat.exists or bareplane_repository_key.stat.checksum | default('') == (lookup('ansible.builtin.file', 'docker.asc', rstrip=false) | hash('sha256'))
+    fail_msg: The existing Bareplane repository key does not match the embedded Docker release key.
+    quiet: true
+
+- name: Detect existing Kubernetes or alternative runtime state
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop:
+    - /etc/kubernetes
+    - /etc/cni/net.d
+    - /var/lib/kubelet
+    - /var/lib/etcd
+    - /etc/docker
+    - /etc/crio
+    - /etc/systemd/system/containerd.service
+    - /etc/systemd/system/containerd.service.d
+  register: bareplane_existing_cluster
+
+- name: Refuse existing cluster state or custom runtime services
+  ansible.builtin.assert:
+    that: not item.stat.exists
+    fail_msg: "Existing state at {{ item.item }} requires explicit lifecycle recovery; host preparation cannot adopt it."
+    quiet: true
+  loop: "{{ bareplane_existing_cluster.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Read installed packages
+  ansible.builtin.package_facts:
+    manager: apt
+
+- name: Refuse conflicting runtime packages and swap generators
+  ansible.builtin.assert:
+    that:
+      - item not in ansible_facts.packages
+    fail_msg: "Conflicting package {{ item }} requires operator review before host preparation."
+    quiet: true
+  loop: [containerd, runc, docker.io, docker-ce, podman, cri-o, zram-tools, systemd-zram-generator]
+
+- name: Refuse an unsupported installed containerd package
+  ansible.builtin.assert:
+    that:
+      - "'containerd.io' not in ansible_facts.packages or ansible_facts.packages['containerd.io'][0].version == bareplane_containerd_package"
+    fail_msg: Existing containerd.io version differs from the exact Bareplane pin; no automatic upgrade or downgrade is permitted.
+    quiet: true
+
+- name: Locate an existing containerd binary
+  ansible.builtin.shell: command -v containerd || true
+  changed_when: false
+  check_mode: false
+  register: bareplane_containerd_binary
+
+- name: Refuse an unmanaged containerd binary
+  ansible.builtin.assert:
+    that:
+      - bareplane_containerd_binary.stdout == '' or (bareplane_containerd_binary.stdout == '/usr/bin/containerd' and 'containerd.io' in ansible_facts.packages and bareplane_host_files.results[0].stat.exists)
+    fail_msg: Existing containerd is not part of a Bareplane-managed installation.
+    quiet: true
+
+- name: Inspect fstab without following links
+  ansible.builtin.stat:
+    path: /etc/fstab
+    follow: false
+  register: bareplane_fstab
+
+- name: Require a regular fstab for persistent swap removal
+  ansible.builtin.assert:
+    that: bareplane_fstab.stat.isreg | default(false) and not bareplane_fstab.stat.islnk | default(false)
+    fail_msg: /etc/fstab must be a regular file.
+    quiet: true
+
+- name: Read configured swap units
+  ansible.builtin.command: systemctl list-unit-files --type=swap --no-legend --no-pager
+  changed_when: false
+  check_mode: false
+  register: bareplane_swap_units
+
+- name: Refuse custom persistent swap units
+  ansible.builtin.assert:
+    that: item.split()[1] in ['generated', 'masked', 'disabled']
+    fail_msg: Custom enabled swap units must be disabled by the operator before preparation.
+    quiet: true
+  loop: "{{ bareplane_swap_units.stdout_lines }}"
