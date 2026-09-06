@@ -1,0 +1,22 @@
+# Private temporary join configuration; removed even after a failed attempt.
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: JoinConfiguration
+nodeRegistration:
+  name: {{ inventory_hostname | to_json }}
+  criSocket: unix:///run/containerd/containerd.sock
+  kubeletExtraArgs:
+    - name: node-ip
+      value: {{ bareplane_vip_facts.node_address | to_json }}
+discovery:
+  bootstrapToken:
+    apiServerEndpoint: {{ (bareplane_api_vip ~ ':' ~ bareplane_api_port) | to_json }}
+    token: {{ bareplane_join_token.stdout | trim | to_json }}
+    caCertHashes:
+      - {{ hostvars[bareplane_primary_control_plane].bareplane_join_primary.discovery_hash | to_json }}
+{% if bareplane_join_identity.control_plane %}
+controlPlane:
+  localAPIEndpoint:
+    advertiseAddress: {{ bareplane_vip_facts.node_address | to_json }}
+    bindPort: {{ bareplane_api_port }}
+  certificateKey: {{ bareplane_join_certificates.stdout_lines[-1] | trim | to_json }}
+{% endif %}

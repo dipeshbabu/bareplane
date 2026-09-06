@@ -1,0 +1,114 @@
+---
+- name: Create private node-local bootstrap directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0700'
+    owner: root
+    group: root
+  loop: [/var/lib/bareplane, /var/lib/bareplane/bootstrap]
+
+- name: Enroll with temporary credentials and guaranteed cleanup
+  block:
+    - name: Create a new ten-minute bootstrap token only for this node
+      ansible.builtin.command:
+        argv: [timeout, --kill-after=5s, 30s, kubeadm, token, create, --kubeconfig, /etc/kubernetes/admin.conf, --ttl=10m, --description=bareplane-node-join]
+      delegate_to: "{{ bareplane_primary_control_plane }}"
+      register: bareplane_join_token
+      no_log: true
+      changed_when: true
+
+    - name: Upload fresh encrypted certificates only for a control-plane join
+      ansible.builtin.command:
+        argv: [timeout, --kill-after=5s, 120s, kubeadm, init, phase, upload-certs, --upload-certs, --kubeconfig, /etc/kubernetes/admin.conf]
+      delegate_to: "{{ bareplane_primary_control_plane }}"
+      register: bareplane_join_certificates
+      no_log: true
+      changed_when: true
+      when: bareplane_join_identity.control_plane
+
+    - name: Validate generated secret formats without displaying them
+      ansible.builtin.assert:
+        that:
+          - bareplane_join_token.stdout | trim is match('^[a-z0-9]{6}\.[a-z0-9]{16}$')
+          - not bareplane_join_identity.control_plane or (bareplane_join_certificates.stdout_lines[-1] | trim is match('^[a-f0-9]{64}$'))
+        quiet: true
+      no_log: true
+
+    - name: Write the temporary private join configuration
+      ansible.builtin.template:
+        src: join.yaml.j2
+        dest: /var/lib/bareplane/bootstrap/join.yaml
+        mode: '0600'
+        owner: root
+        group: root
+      no_log: true
+
+    - name: Record intent before kubeadm can mutate this node
+      ansible.builtin.copy:
+        content: "{{ bareplane_join_state.digest }}\n"
+        dest: /var/lib/bareplane/bootstrap/join-intent
+        mode: '0600'
+        owner: root
+        group: root
+
+    - name: Join with bounded private output
+      ansible.builtin.shell: |
+        umask 077
+        ulimit -f 1024
+        timeout --kill-after=10s 900s kubeadm join \
+          --config /var/lib/bareplane/bootstrap/join.yaml \
+          > /var/lib/bareplane/bootstrap/join-output 2>&1
+      register: bareplane_join_attempt
+      no_log: true
+      changed_when: true
+      failed_when: false
+
+    - name: Require kubeadm join to finish successfully
+      ansible.builtin.assert:
+        that: bareplane_join_attempt.rc == 0
+        quiet: true
+        fail_msg: kubeadm join failed. Inspect /var/lib/bareplane/bootstrap/join-output privately and use explicit recovery; never publish join credentials.
+  always:
+    - name: Remove the node-local secret-bearing configuration
+      ansible.builtin.file:
+        path: /var/lib/bareplane/bootstrap/join.yaml
+        state: absent
+      no_log: true
+      ignore_errors: true
+      register: bareplane_join_config_cleanup
+
+    - name: Revoke the temporary join token on the primary
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --request-timeout=5s, -n, kube-system, delete, secret, "bootstrap-token-{{ (bareplane_join_token.stdout | trim).split('.')[0] }}", --ignore-not-found]
+      delegate_to: "{{ bareplane_primary_control_plane }}"
+      no_log: true
+      changed_when: true
+      ignore_errors: true
+      register: bareplane_join_token_cleanup
+      when: bareplane_join_token.stdout | default('') | trim is match('^[a-z0-9]{6}\.[a-z0-9]{16}$')
+
+    - name: Remove uploaded certificates after the control-plane attempt
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --request-timeout=5s, -n, kube-system, delete, secret, kubeadm-certs, --ignore-not-found]
+      delegate_to: "{{ bareplane_primary_control_plane }}"
+      no_log: true
+      changed_when: true
+      ignore_errors: true
+      register: bareplane_join_certificate_cleanup
+      when: bareplane_join_identity.control_plane and bareplane_join_certificates is defined
+
+    - name: Clear temporary secret variables
+      ansible.builtin.set_fact:
+        bareplane_join_token: {}
+        bareplane_join_certificates: {}
+      no_log: true
+
+    - name: Report any cleanup failure after attempting every cleanup action
+      ansible.builtin.assert:
+        that:
+          - bareplane_join_config_cleanup is not failed
+          - bareplane_join_token_cleanup is not failed
+          - bareplane_join_certificate_cleanup is not failed
+        quiet: true
+        fail_msg: Join credential cleanup failed. Remove the private node join configuration and revoke temporary bootstrap material on the primary; tokens expire after ten minutes and uploaded certificates after two hours.

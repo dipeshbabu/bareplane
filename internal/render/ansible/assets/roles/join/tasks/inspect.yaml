@@ -1,0 +1,69 @@
+---
+- name: Refuse partial inventory execution without primary identity checks
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname != bareplane_primary_control_plane
+      - hostvars[bareplane_primary_control_plane].bareplane_join_primary.discovery_hash is defined
+      - not ansible_check_mode
+    quiet: true
+    fail_msg: Run the complete join playbook after primary initialization and Cilium; kubeadm joining does not support check mode.
+
+- name: Discover the authenticated machine address
+  bareplane_vip_probe:
+    vip: "{{ bareplane_api_vip }}"
+    check_conflicts: false
+  register: bareplane_vip_facts
+
+- name: Bind node identity to the cluster CA and desired configuration
+  ansible.builtin.set_fact:
+    bareplane_join_identity:
+      cluster: "{{ bareplane_cluster }}"
+      ca_sha256: "{{ hostvars[bareplane_primary_control_plane].bareplane_join_primary.ca_sha256 }}"
+      name: "{{ inventory_hostname }}"
+      control_plane: "{{ inventory_hostname in groups['control_plane'] }}"
+      version: "{{ bareplane_kubernetes_version }}"
+      endpoint: "{{ bareplane_api_vip }}:{{ bareplane_api_port }}"
+      address: "{{ bareplane_vip_facts.node_address }}"
+    bareplane_vip_kubeconfig: admin.conf
+
+- name: Read the expected node from the authenticated primary
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --request-timeout=5s, get, node, "{{ inventory_hostname }}", --ignore-not-found, -o, json]
+  delegate_to: "{{ bareplane_primary_control_plane }}"
+  changed_when: false
+  register: bareplane_join_existing
+
+- name: Refuse foreign, modified, or ambiguous join state
+  bareplane_join_state:
+    operation: node
+    identity: "{{ bareplane_join_identity }}"
+    node: "{{ bareplane_join_existing.stdout | from_json if bareplane_join_existing.stdout | length > 0 else {} }}"
+  register: bareplane_join_state
+
+- name: Inspect the additional control-plane VIP manifest
+  ansible.builtin.stat:
+    path: /etc/kubernetes/manifests/kube-vip.yaml
+    follow: false
+    checksum_algorithm: sha256
+  register: bareplane_join_vip
+  when: bareplane_join_identity.control_plane
+
+- name: Require the reviewed VIP manifest before joining a control plane
+  ansible.builtin.assert:
+    that:
+      - bareplane_join_vip.stat.isreg | default(false) and not bareplane_join_vip.stat.islnk | default(false)
+      - bareplane_join_vip.stat.checksum | default('') == (lookup('ansible.builtin.template', role_path ~ '/../api_vip/templates/kube-vip.yaml.j2') | hash('sha256'))
+    quiet: true
+    fail_msg: Apply the managed API VIP phase before joining this control plane.
+  when: bareplane_join_identity.control_plane
+
+- name: Read the installed kubeadm version
+  ansible.builtin.command: kubeadm version -o short
+  changed_when: false
+  register: bareplane_join_version
+
+- name: Require the exact reviewed kubeadm version
+  ansible.builtin.assert:
+    that: bareplane_join_version.stdout == 'v' ~ bareplane_kubernetes_version
+    quiet: true
+    fail_msg: Install the pinned Kubernetes toolchain before joining.

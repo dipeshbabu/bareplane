@@ -1,0 +1,56 @@
+---
+- name: Wait for the exact joined node to become Ready
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --request-timeout=15s, wait, --for=condition=Ready, "node/{{ inventory_hostname }}", --timeout=300s]
+  delegate_to: "{{ bareplane_primary_control_plane }}"
+  changed_when: false
+
+- name: Read the joined node identity and supported kubeadm role
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --request-timeout=5s, get, node, "{{ inventory_hostname }}", -o, json]
+  delegate_to: "{{ bareplane_primary_control_plane }}"
+  changed_when: false
+  register: bareplane_join_node
+
+- name: Verify node name, address, version, role, taint, and readiness
+  bareplane_join_state:
+    operation: verify
+    identity: "{{ bareplane_join_identity }}"
+    node: "{{ bareplane_join_node.stdout | from_json }}"
+  register: bareplane_join_verified
+
+- name: Verify a joined control-plane API directly
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, "--server=https://{{ bareplane_vip_facts.node_address }}:{{ bareplane_api_port }}", --request-timeout=5s, get, --raw=/readyz]
+  changed_when: false
+  when: bareplane_join_identity.control_plane
+
+- name: Wait for stacked etcd and kube-vip on the new control plane
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --request-timeout=15s, -n, kube-system, wait, --for=condition=Ready, "pod/{{ item }}-{{ inventory_hostname }}", --timeout=180s]
+  loop: [etcd, kube-vip]
+  changed_when: false
+  when: bareplane_join_identity.control_plane
+
+- name: Authenticate the local kubelet against the primary cluster identity
+  bareplane_join_state:
+    operation: node
+    identity: "{{ bareplane_join_identity }}"
+    node: "{{ bareplane_join_node.stdout | from_json }}"
+
+- name: Record the initialized control-plane ownership contract
+  ansible.builtin.copy:
+    content: "{{ bareplane_cluster }}\n"
+    dest: /etc/kubernetes/.bareplane-init-complete
+    mode: '0600'
+    owner: root
+    group: root
+  when: bareplane_join_identity.control_plane
+
+- name: Record completion bound to the live node UID
+  ansible.builtin.copy:
+    content: "{{ bareplane_join_state.digest }}\n{{ bareplane_join_verified.uid }}\n"
+    dest: /var/lib/bareplane/bootstrap/join-complete
+    mode: '0600'
+    owner: root
+    group: root

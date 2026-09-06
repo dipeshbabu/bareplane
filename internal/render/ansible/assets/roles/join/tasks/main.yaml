@@ -1,5 +1,10 @@
 ---
-- name: Refuse the unavailable join phase
-  ansible.builtin.fail:
-    msg: "Bootstrap phase join is not implemented; see Bareplane issue #63."
-  tags: [always]
+- name: Inspect node ownership before issuing credentials
+  ansible.builtin.import_tasks: inspect.yaml
+
+- name: Join an uninitialized node with fresh short-lived credentials
+  ansible.builtin.import_tasks: enroll.yaml
+  when: bareplane_join_state.state == 'fresh'
+
+- name: Verify the joined node before recording completion
+  ansible.builtin.import_tasks: ready.yaml

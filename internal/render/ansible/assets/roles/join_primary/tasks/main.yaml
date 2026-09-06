@@ -1,0 +1,18 @@
+---
+- name: Verify primary ownership and read the public cluster identity
+  bareplane_join_state:
+    operation: primary
+    cluster: "{{ bareplane_cluster }}"
+  register: bareplane_join_primary
+
+- name: Require the primary API to be healthy
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --request-timeout=5s, get, --raw=/readyz]
+  changed_when: false
+  check_mode: false
+
+- name: Require Cilium to be ready before issuing join material
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --request-timeout=15s, -n, kube-system, rollout, status, daemonset/cilium, --timeout=60s]
+  changed_when: false
+  check_mode: false

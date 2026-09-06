@@ -1,0 +1,26 @@
+---
+- name: Read the complete cluster topology
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --request-timeout=5s, get, nodes, -o, json]
+  changed_when: false
+  check_mode: false
+  register: bareplane_topology
+
+- name: Require exactly the intended machines
+  ansible.builtin.assert:
+    that: ((bareplane_topology.stdout | from_json)['items'] | map(attribute='metadata.name') | sort) == ((bareplane_control_planes + bareplane_workers) | sort)
+    quiet: true
+    fail_msg: The live Kubernetes topology does not match the desired Bareplane machines.
+
+- name: Require every desired machine to be Ready at the pinned version and role
+  ansible.builtin.assert:
+    that:
+      - item.status.nodeInfo.kubeletVersion == 'v' ~ bareplane_kubernetes_version
+      - (item.status.conditions | selectattr('type', 'equalto', 'Ready') | map(attribute='status') | list) == ['True']
+      - (('node-role.kubernetes.io/control-plane' in item.metadata.labels) == (item.metadata.name in bareplane_control_planes))
+      - ((item.spec.taints | default([]) | selectattr('key', 'equalto', 'node-role.kubernetes.io/control-plane') | selectattr('effect', 'equalto', 'NoSchedule') | list | length > 0) == (item.metadata.name in bareplane_control_planes))
+    quiet: true
+    fail_msg: A machine is not Ready at the intended Kubernetes version and role.
+  loop: "{{ (bareplane_topology.stdout | from_json)['items'] }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
