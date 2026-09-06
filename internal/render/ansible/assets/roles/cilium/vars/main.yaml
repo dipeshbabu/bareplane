@@ -1,0 +1,16 @@
+---
+bareplane_helm_version: '3.21.4'
+bareplane_helm_arches:
+  x86_64: amd64
+  aarch64: arm64
+bareplane_helm_sha256:
+  amd64: '61f88ab166748cb19604d7884cb100ae9ccb13804ddeb98e08af167eacbb6a14'
+  arm64: 'b54c04b4e0b2540bbdc08c17a121dab70e9a2ed0de5705528fec68a5fd3b85a7'
+bareplane_helm_binary_sha256:
+  amd64: cd27ec335b9c961a0a098cce870fded88429210edc898fd213da0b16e67333bd
+  arm64: 797106728c6cd3782e1570f6e10582f04b52eef85c4873d625206f6aea811cc6
+bareplane_cilium_sha256:
+  '1.20.0': c5f013912360d1a334f44ef25f36da59ba3414cdb48f466ee12d0c4fdff27883
+  '1.20.1': 06210eef7c23d15f7699c79e2fe3a1ec9c389024c5c5c006ea04022d322449a2
+bareplane_helm_root: /var/lib/bareplane/bootstrap/helm-3.21.4
+bareplane_helm_binary: "{{ bareplane_helm_root }}/linux-{{ bareplane_helm_arches[ansible_facts.architecture] }}/helm"

@@ -1,0 +1,44 @@
+---
+- name: Wait for Cilium agents
+  ansible.builtin.command: kubectl --kubeconfig /etc/kubernetes/admin.conf --request-timeout=10s -n kube-system rollout status daemonset/cilium --timeout=300s
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Wait for the Cilium operator
+  ansible.builtin.command: kubectl --kubeconfig /etc/kubernetes/admin.conf --request-timeout=10s -n kube-system rollout status deployment/cilium-operator --timeout=300s
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Wait for the primary node network
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --request-timeout=10s, wait, --for=condition=Ready, "node/{{ bareplane_primary_control_plane }}", --timeout=300s]
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Wait for CoreDNS scheduling and readiness
+  ansible.builtin.command: kubectl --kubeconfig /etc/kubernetes/admin.conf --request-timeout=10s -n kube-system rollout status deployment/coredns --timeout=300s
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Read the Kubernetes service address
+  ansible.builtin.command: kubectl --kubeconfig /etc/kubernetes/admin.conf --request-timeout=10s get service kubernetes -o json
+  changed_when: false
+  register: bareplane_kubernetes_service
+  when: not ansible_check_mode
+
+- name: Verify service routing without kube-proxy
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, "--server=https://{{ (bareplane_kubernetes_service.stdout | from_json).spec.clusterIP }}:443", --request-timeout=10s, get, --raw=/readyz]
+  changed_when: false
+  register: bareplane_cilium_service_ready
+  until: bareplane_cilium_service_ready.rc == 0 and bareplane_cilium_service_ready.stdout == 'ok'
+  retries: 6
+  delay: 5
+  when: not ansible_check_mode
+
+- name: Record Cilium completion after networking passes
+  ansible.builtin.copy:
+    content: "{{ bareplane_cilium_digest }}\n"
+    dest: /var/lib/bareplane/bootstrap/cilium-complete
+    mode: '0600'
+  when: not ansible_check_mode
