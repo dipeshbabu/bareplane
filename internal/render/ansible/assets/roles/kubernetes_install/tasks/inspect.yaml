@@ -71,7 +71,7 @@
   ansible.builtin.stat:
     path: "{{ item }}"
     follow: false
-  loop: [/etc/kubernetes, /var/lib/kubelet/config.yaml, /var/lib/kubelet/kubeadm-flags.env, /etc/systemd/system/kubelet.service, /etc/systemd/system/kubelet.service.d]
+  loop: [/var/lib/kubelet/config.yaml, /var/lib/kubelet/kubeadm-flags.env, /etc/systemd/system/kubelet.service, /etc/systemd/system/kubelet.service.d]
   register: bareplane_kubernetes_state
 
 - name: Refuse existing cluster state or custom kubelet services
@@ -82,6 +82,41 @@
   loop: "{{ bareplane_kubernetes_state.results }}"
   loop_control:
     label: "{{ item.item }}"
+
+- name: Inspect package-created Kubernetes directories
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop: [/etc/kubernetes, /var/lib/kubelet]
+  register: bareplane_kubernetes_directories
+
+- name: Refuse redirected Kubernetes state directories
+  ansible.builtin.assert:
+    that: not item.stat.exists or (item.stat.isdir | default(false) and not item.stat.islnk | default(false))
+    quiet: true
+    fail_msg: Kubernetes state directories must be real directories.
+  loop: "{{ bareplane_kubernetes_directories.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Inspect existing Kubernetes state entries
+  ansible.builtin.find:
+    paths: "{{ bareplane_kubernetes_directories.results | selectattr('stat.exists') | map(attribute='item') | list }}"
+    recurse: true
+    hidden: true
+    follow: false
+    file_type: any
+  register: bareplane_kubernetes_entries
+  when: bareplane_kubernetes_directories.results | selectattr('stat.exists') | list | length > 0
+
+- name: Allow only the package's empty pre-bootstrap directories and keep files
+  ansible.builtin.assert:
+    that: (item.path == '/etc/kubernetes/manifests' and item.isdir) or (item.path in ['/etc/kubernetes/manifests/.kubelet-keep', '/var/lib/kubelet/.kubelet-keep'] and item.isreg and item.size == 0)
+    quiet: true
+    fail_msg: "Existing Kubernetes state at {{ item.path }} requires a lifecycle workflow."
+  loop: "{{ bareplane_kubernetes_entries.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
 
 - name: Inspect toolchain configuration ownership
   ansible.builtin.stat:
