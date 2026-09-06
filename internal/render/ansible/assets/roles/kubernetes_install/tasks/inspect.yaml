@@ -33,6 +33,24 @@
     quiet: true
     fail_msg: Complete host_prepare with the pinned containerd runtime first.
 
+- name: Refuse an incompatible installed CRI tool version
+  ansible.builtin.assert:
+    that: "'cri-tools' not in ansible_facts.packages or ansible_facts.packages['cri-tools'][0].version == bareplane_cri_tools_package_version"
+    quiet: true
+    fail_msg: Installed cri-tools differs from the pinned Kubernetes minor toolchain.
+
+- name: Locate crictl before installation
+  ansible.builtin.shell: command -v crictl || true
+  changed_when: false
+  check_mode: false
+  register: bareplane_crictl_binary
+
+- name: Refuse an untracked or shadowing crictl binary
+  ansible.builtin.assert:
+    that: bareplane_crictl_binary.stdout == '' or (bareplane_crictl_binary.stdout == '/usr/bin/crictl' and 'cri-tools' in ansible_facts.packages)
+    quiet: true
+    fail_msg: Existing crictl is outside the supported package installation.
+
 - name: Inspect required parent directories
   ansible.builtin.stat:
     path: "{{ item }}"

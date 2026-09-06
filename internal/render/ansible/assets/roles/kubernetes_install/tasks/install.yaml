@@ -19,7 +19,7 @@
 
 - name: Install the exact Kubernetes package versions
   ansible.builtin.apt:
-    name: "{{ bareplane_kubernetes_packages | map('regex_replace', '$', '=' ~ bareplane_kubernetes_package_version) | list }}"
+    name: "{{ (bareplane_kubernetes_packages | map('regex_replace', '$', '=' ~ bareplane_kubernetes_package_version) | list) + ['cri-tools=' ~ bareplane_cri_tools_package_version] }}"
     state: present
     update_cache: true
     cache_valid_time: "{{ 0 if bareplane_kubernetes_configuration.results[0] is changed else 3600 }}"
@@ -33,7 +33,7 @@
   ansible.builtin.dpkg_selections:
     name: "{{ item }}"
     selection: hold
-  loop: "{{ bareplane_kubernetes_packages }}"
+  loop: "{{ bareplane_kubernetes_packages + ['cri-tools'] }}"
 
 - name: Enable kubelet without forcing an unconfigured service to run
   ansible.builtin.systemd_service:

@@ -26,7 +26,7 @@
     - name: Require the package holds
       ansible.builtin.assert:
         that: item in held_packages.stdout_lines
-      loop: [kubelet, kubeadm, kubectl, containerd.io]
+      loop: [kubelet, kubeadm, kubectl, cri-tools, containerd.io]
     - name: Check that no cluster was created
       ansible.builtin.stat:
         path: /etc/kubernetes/admin.conf
