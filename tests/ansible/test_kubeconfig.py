@@ -10,7 +10,7 @@ import unittest
 
 import yaml
 
-source = Path(__file__).resolve().parents[2] / 'internal/render/ansible/assets/library/bareplane_kubeconfig.py'
+source = Path(__file__).resolve().parents[2] / 'internal/render/ansible/assets/module_utils/bareplane_kubeconfig.py'
 spec = importlib.util.spec_from_file_location('kubeconfig', source)
 kubeconfig = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(kubeconfig)

@@ -217,8 +217,12 @@ func TestBundleAnsibleIntegration(t *testing.T) {
 				args = append(args, "--check")
 			}
 			out := run(true, args...)
-			if !strings.Contains(out, "issue #65") || strings.Contains(out, "UNREACHABLE") {
-				t.Fatalf("unavailable phase failed incorrectly: %s", out)
+			want := "Private kubeconfig is unavailable"
+			if check {
+				want = "check mode is unsupported"
+			}
+			if !strings.Contains(out, want) || strings.Contains(out, "UNREACHABLE") {
+				t.Fatalf("health prerequisite failed incorrectly: %s", out)
 			}
 		}
 	}

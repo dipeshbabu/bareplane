@@ -1,6 +1,6 @@
 ---
 - name: health
-  hosts: "all"
+  hosts: "control_plane[0]"
   gather_facts: false
   any_errors_fatal: true
   roles:
