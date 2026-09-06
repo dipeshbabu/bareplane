@@ -100,7 +100,7 @@
 
 - name: Refuse unmanaged CNI files
   ansible.builtin.assert:
-    that: bareplane_cilium_done and item.isreg and item.path == '/etc/cni/net.d/05-cilium.conflist'
+    that: (item.isreg and item.path == '/etc/cni/net.d/.kubernetes-cni-keep' and item.size == 0) or (bareplane_cilium_done and item.isreg and item.path == '/etc/cni/net.d/05-cilium.conflist')
     quiet: true
     fail_msg: Existing CNI configuration cannot be adopted or overwritten by bootstrap.
   loop: "{{ bareplane_cilium_cni.files }}"
