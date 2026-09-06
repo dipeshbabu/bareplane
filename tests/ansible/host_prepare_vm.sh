@@ -71,3 +71,4 @@ if ! ansible-playbook -i tests/ansible/control_plane.ini tests/ansible/cilium.ya
 fi
 cat "$workspace/cilium-rerun.log"
 grep -Eq 'changed=0 .*unreachable=0 .*failed=0' "$workspace/cilium-rerun.log"
+ansible-playbook -i tests/ansible/control_plane.ini tests/ansible/join_single.yaml

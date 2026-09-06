@@ -1,9 +1,38 @@
 ---
-- name: join
-  hosts: "all"
+- name: Verify the initialized primary before joining nodes
+  hosts: "control_plane[0]"
   gather_facts: false
+  become: true
   any_errors_fatal: true
   roles:
     - role: contract
       tags: [always]
+    - role: join_primary
+
+- name: Join additional control planes in deterministic order
+  hosts: "control_plane[1:]"
+  order: sorted
+  serial: 1
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  roles:
     - role: join
+
+- name: Join workers after the control planes are ready
+  hosts: workers
+  order: sorted
+  serial: 1
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  roles:
+    - role: join
+
+- name: Verify the complete desired topology
+  hosts: "control_plane[0]"
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  roles:
+    - role: join_topology

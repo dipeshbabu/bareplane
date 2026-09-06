@@ -90,7 +90,7 @@ ansible-playbook --syntax-check site.yaml
 ansible-playbook validate.yaml
 ```
 
-The second command previews the contract entirely on the controller. `site.yaml` orders host preparation, package installation, API VIP, primary control plane, Cilium, joins, kubeconfig, and health. Preparation through primary Cilium networking is implemented; subsequent phases stop with explicit issue-specific errors until issues #63–#65 implement them. Syntax validation and contract preview do not indicate a bootstrapped cluster.
+The second command previews the contract entirely on the controller. `site.yaml` orders host preparation, package installation, API VIP, primary control plane, Cilium, joins, kubeconfig, and health. Preparation through node joining is implemented; subsequent phases stop with explicit issue-specific errors until issues #64–#65 implement them. Syntax validation and contract preview do not indicate a bootstrapped cluster.
 
 ## Kubernetes packages
 
@@ -141,6 +141,18 @@ The bootstrap installer currently includes reviewed SHA-256 artifact pins for Ci
 The release is named `bareplane-cilium` in `kube-system`. Bootstrap refuses existing CNI configuration and conflicting resources, and verifies its private intent/completion records, Helm chart/version, and live values on reruns. It never upgrades or reinstalls an unchanged release. Cilium remains bootstrap-owned and must be excluded from Argo CD handoff. Any partial installation, conflicting CNI, or changed networking contract requires explicit recovery or lifecycle planning.
 
 Completion requires bounded readiness checks for the Cilium DaemonSet and operator, the primary node, and CoreDNS, followed by an authenticated API request through the Kubernetes ClusterIP to verify service routing without kube-proxy. A completion record is written only after those checks pass.
+
+## Joining the remaining nodes
+
+`join.yaml` first checks the initialized primary and Cilium, then joins additional control planes in sorted machine-name order, one at a time, followed by workers. A single-primary topology issues no join credentials. The current address discovery requires every joining machine to share the on-link IPv4 VIP LAN.
+
+Each fresh node receives a new ten-minute bootstrap token and pins discovery to the primary CA public-key hash. Additional control planes use kubeadm's encrypted certificate upload and stacked-etcd join. Secret values are suppressed from Ansible output, never enter generated inventory, and live only in a root-only temporary node configuration. Cleanup attempts to remove that configuration, revoke the token, and delete the uploaded certificate Secret even after failure. If connectivity prevents cleanup, tokens expire after ten minutes and kubeadm's uploaded certificates after two hours. Failed cleanup is reported, not ignored.
+
+Join intent binds the cluster CA, machine name, observed IP, role, version, and VIP. Completion also binds the live Kubernetes node UID. Reruns authenticate with the node's own kubelet credential and verify its intended identity, Ready condition, control-plane label/taint, and pinned version. Control planes additionally require a healthy local API, stacked-etcd pod, and kube-vip pod. A successful kubeadm join interrupted before the completion marker can finish these checks without issuing new credentials or rejoining.
+
+Foreign clusters, unmanaged existing nodes, changed identities, and incomplete kubeadm attempts are refused without reset. Inspect `/var/lib/bareplane/bootstrap/join-output` privately; its bounded, owner-only output may contain sensitive join material. Check mode is intentionally unsupported for joining new nodes. Run the complete join playbook, not an inventory-limited subset, so the final gate can verify the exact desired topology.
+
+The implementation follows the supported [kubeadm join](https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-join/) and [high-availability certificate upload](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/high-availability/) workflows. Workload labels remain outside bootstrap ownership.
 
 ## Local bootstrap doctor
 

@@ -10,6 +10,30 @@ permissions:
   contents: read
 
 jobs:
+  join-topology:
+    name: Multi-node join VMs
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install disposable KVM test prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-utils cloud-image-utils
+          python -m pip install ansible-core==2.19.9
+          go build -o bin/bareplane ./cmd/bareplane
+      - name: Join three control planes and a worker, refuse foreign state, and reapply
+        env:
+          BAREPLANE_DISPOSABLE_VM: '1'
+        run: python tests/ansible/join_topology_vm.py
+
   host-prepare:
     name: Host preparation VM
     runs-on: ubuntu-latest
