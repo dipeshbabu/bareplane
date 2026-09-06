@@ -44,6 +44,13 @@ cat "$workspace/vip-rerun.log"
 grep -Eq 'changed=0 .*unreachable=0 .*failed=0' "$workspace/vip-rerun.log"
 ansible-playbook -i tests/ansible/control_plane.ini tests/ansible/primary_refuse_partial.yaml
 if ! ansible-playbook -i tests/ansible/control_plane.ini tests/ansible/primary_init.yaml; then
+  # Use the fixture node address to diagnose the VIP independently of its route.
+  kubectl --kubeconfig /etc/kubernetes/admin.conf --server=https://192.0.2.10:6443 --request-timeout=5s get pods -A -o wide || true
+  for vip_container in $(crictl ps -a --name kube-vip -q); do
+    crictl logs --tail=40 "$vip_container" 2>&1 \
+      | grep -Ei 'error|warn|failed|fatal|panic' \
+      | sed -E 's/[[:alnum:]+\/_=-]{32,}/[redacted]/g; s/[a-z0-9]{6}\.[a-z0-9]{16}/[redacted]/g' || true
+  done
   # Only bounded error lines from this disposable fixture; never publish join output.
   if test -f /var/lib/bareplane/bootstrap/init-output; then
     grep -Ei '\[ERROR|error execution|timed out|failed' /var/lib/bareplane/bootstrap/init-output \
