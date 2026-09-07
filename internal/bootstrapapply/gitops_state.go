@@ -22,13 +22,18 @@ type GitOpsProgress struct {
 	BootstrapContract string `json:"bootstrapContractSHA256"`
 	Trust             string `json:"trustSHA256"`
 	Contract          string `json:"gitopsContractSHA256"`
+	HandoffContract   string `json:"handoffContractSHA256,omitempty"`
 	Stage             string `json:"stage"`
 	Log               string `json:"log,omitempty"`
 }
 
 func encodeGitOpsProgress(record GitOpsProgress) ([]byte, error) {
-	if record.Version != 1 || record.Cluster == "" || !validDigest(record.BootstrapContract) || !validDigest(record.Trust) || !validDigest(record.Contract) || (record.Stage != "installing" && record.Stage != "argocd-ready") {
+	handoff := record.Stage == "handing-off" || record.Stage == "gitops-handed-off"
+	if record.Version != 1 || record.Cluster == "" || !validDigest(record.BootstrapContract) || !validDigest(record.Trust) || !validDigest(record.Contract) || (record.Stage != "installing" && record.Stage != "argocd-ready" && !handoff) {
 		return nil, errors.New("invalid GitOps progress record")
+	}
+	if (handoff && !validDigest(record.HandoffContract)) || (!handoff && record.HandoffContract != "") {
+		return nil, errors.New("invalid GitOps handoff contract")
 	}
 	if record.Log != "" && (filepath.Base(record.Log) != record.Log || filepath.Ext(record.Log) != ".log") {
 		return nil, errors.New("invalid GitOps progress log reference")

@@ -31,6 +31,15 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "terraform-lock: %t\n", report.LockPresent)
 	fmt.Fprintf(stdout, "saved-plan: %t\n", report.PlanPresent)
 	fmt.Fprintf(stdout, "plan-attestation: %t\n", report.ManifestPresent)
+	fmt.Fprintf(stdout, "kubernetes-ready: %t\n", report.Readiness.KubernetesReady)
+	fmt.Fprintf(stdout, "argocd-ready: %t\n", report.Readiness.ArgoReady)
+	fmt.Fprintf(stdout, "gitops-handed-off: %t\n", report.Readiness.HandedOff)
+	if report.Readiness.BootstrapPresent {
+		fmt.Fprintln(stdout, "readiness-source: local recorded success, not a live cluster check")
+	}
+	if report.BootstrapOperation.Present {
+		fmt.Fprintf(stdout, "bootstrap-operation: %s (pid %d)\n", report.BootstrapOperation.Operation, report.BootstrapOperation.PID)
+	}
 	if report.Operation.Present {
 		fmt.Fprintf(stdout, "operation: %s (pid %d)\n", report.Operation.Operation, report.Operation.PID)
 	} else {

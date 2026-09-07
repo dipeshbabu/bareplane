@@ -41,6 +41,7 @@ go run ./cmd/bareplane bootstrap trust
 go run ./cmd/bareplane bootstrap preflight
 go run ./cmd/bareplane gitops render
 go run ./cmd/bareplane gitops install --approve <cluster-name>
+go run ./cmd/bareplane gitops handoff --approve <cluster-name>
 go run ./cmd/bareplane version
 ```
 
@@ -51,6 +52,8 @@ See [docs/configuration.md](docs/configuration.md), [docs/doctor.md](docs/doctor
 The [GitOps renderer](docs/gitops-render.md) creates a deterministic public repository export under `gitops/`, with no cluster mutation, Git commit, or push. It refuses unimplemented profiles and preserves edited or unmanaged output.
 
 The [minimal Argo installer](docs/gitops-install.md) requires completed bootstrap, fresh health, a reviewed export, anonymous Git prerequisites, and exact approval. It refuses unmanaged Argo resources and reports readiness separately from root Application handoff.
+
+The [root handoff](docs/gitops-handoff.md) verifies a published snapshot, pins initial root/child reconciliation, then transfers steady-state ownership to Git. Status distinguishes the recorded Kubernetes, Argo, and handed-off stages without claiming a live health scan.
 
 ## Development
 

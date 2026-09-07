@@ -63,7 +63,8 @@ def main():
     work = Path(tempfile.mkdtemp(prefix='bareplane-join-vm-'))
     apply_mode = os.environ.get('BAREPLANE_TEST_BOOTSTRAP_APPLY') == '1'
     recovery_mode = os.environ.get('BAREPLANE_TEST_BOOTSTRAP_RECOVERY') == '1'
-    argocd_mode = os.environ.get('BAREPLANE_TEST_ARGOCD_INSTALL') == '1'
+    handoff_mode = os.environ.get('BAREPLANE_TEST_GITOPS_HANDOFF') == '1'
+    argocd_mode = os.environ.get('BAREPLANE_TEST_ARGOCD_INSTALL') == '1' or handoff_mode
     single_mode = recovery_mode or argocd_mode
     guests = []
     logs = []
@@ -180,7 +181,7 @@ def main():
             # Public immutable fixture proves Git reachability only. No remote
             # payload is applied in the installation issue; root handoff is separate.
             spec['gitops'] = dict(repoURL='https://github.com/dipeshbabu/bareplane.git',
-                                  revision='50561433e64dc3a0d395f0f1ea64d627eb2ff725', rootPath='missing/root')
+                                  revision='main' if handoff_mode else '50561433e64dc3a0d395f0f1ea64d627eb2ff725', rootPath='missing/root')
         spec['bootstrap']['ssh'] = dict(user='root', privateKeyFile=str(key), hosts=hosts)
         spec['kubernetes']['apiVIP'] = '192.0.2.100'
         project = work / ("project 'quoted' \"double\" %h" if apply_mode else 'project')
@@ -240,7 +241,7 @@ def main():
                     refuse('Configured Git root is missing')
                     if api('get', 'namespace', 'argocd', '--ignore-not-found', '-o', 'json'):
                         raise RuntimeError('Missing repository path still created Argo state')
-                    spec['gitops']['rootPath'] = 'internal/render/gitops/assets/argocd'
+                    spec['gitops']['rootPath'] = 'examples/gitops/root' if handoff_mode else 'internal/render/gitops/assets/argocd'
                     write_yaml(config_path, config)
                     run([REPO / 'bin/bareplane', 'gitops', 'render', config_path])
                     foreign = api('create', 'namespace', 'argocd', '-o', 'json')
@@ -263,6 +264,56 @@ def main():
                     if api('get', 'applications,applicationsets', '-n', 'argocd', '-o', 'json')['items']:
                         raise RuntimeError('Installation performed an unrequested root handoff')
                     print('Pinned minimal Argo is Ready; public Git and unmanaged namespace guards passed; rerun preserved every resource UID.', flush=True)
+                    if handoff_mode:
+                        handoff = [REPO / 'bin/bareplane', 'gitops', 'handoff', '--approve', 'lab', config_path]
+                        root_file = project / 'gitops/bootstrap/lab-root-application.yaml'
+                        approved = root_file.read_bytes()
+                        root_file.write_bytes(b'modified local export')
+                        refused = subprocess.run([str(a) for a in handoff], capture_output=True, timeout=120)
+                        root_file.write_bytes(approved)
+                        if refused.returncode == 0 or api('get', 'application', 'lab-root', '-n', 'argocd', '--ignore-not-found', '-o', 'json'):
+                            raise RuntimeError('Modified export reached root creation')
+                        foreign_root = yaml.safe_load(approved)
+                        foreign_root['metadata']['annotations'] = {'fixture': 'unmanaged'}
+                        foreign_root['spec']['syncPolicy']['automated']['enabled'] = False
+                        foreign_root = api('create', '-f', '-', '-o', 'json', data=foreign_root)
+                        refused = subprocess.run([str(a) for a in handoff], capture_output=True, timeout=1800)
+                        observed = api('get', 'application', 'lab-root', '-n', 'argocd', '-o', 'json')
+                        if refused.returncode == 0 or observed['metadata']['uid'] != foreign_root['metadata']['uid'] or observed['metadata'].get('annotations', {}).get('bareplane.io/handoff'):
+                            raise RuntimeError('Unrelated root was accepted or modified')
+                        api('delete', '--raw=/apis/argoproj.io/v1alpha1/namespaces/argocd/applications/lab-root', '-f', '-',
+                            data=dict(apiVersion='v1', kind='DeleteOptions', preconditions=dict(uid=foreign_root['metadata']['uid'])))
+                        run(kubectl + ['wait', '--for=delete', 'application/lab-root', '-n', 'argocd', '--timeout=90s'])
+                        run(handoff)
+                        root = api('get', 'application', 'lab-root', '-n', 'argocd', '-o', 'json')
+                        receipt = json.loads((trust / 'handoff.json').read_text())
+                        if not receipt['complete'] or receipt['mode'] != 'following' or root['spec']['source']['targetRevision'] != 'main' or root['spec']['source'].get('kustomize'):
+                            raise RuntimeError('Verified snapshot was not transitioned to the configured revision')
+                        child = api('get', 'application', 'lab-argocd', '-n', 'argocd', '-o', 'json')
+                        if child['spec']['source']['targetRevision'] != 'main' or child['status']['sync']['status'] != 'Synced' or child['status']['health']['status'] != 'Healthy':
+                            raise RuntimeError('Argo child did not reconcile the published source')
+                        tracking = api('get', 'configmap', 'argocd-cm', '-n', 'argocd', '-o', 'json')['metadata'].get('annotations', {}).get('argocd.argoproj.io/tracking-id', '')
+                        if not tracking.startswith('lab-argocd:'):
+                            raise RuntimeError('Argo did not take steady-state ownership of its configuration')
+                        for identity, entry in original['resources'].items():
+                            kind, name = identity.split('/', 1)
+                            args = ['get', kind, name, '-o', 'jsonpath={.metadata.uid}']
+                            if kind not in {'Namespace', 'CustomResourceDefinition', 'ClusterRole', 'ClusterRoleBinding'}:
+                                args += ['-n', 'argocd']
+                            uid = run(kubectl + args, capture_output=True).stdout.decode()
+                            if uid != entry['uid']:
+                                raise RuntimeError('Argo self-management recreated an owned resource: ' + identity)
+                        run(handoff)
+                        repeat = api('get', 'application', 'lab-root', '-n', 'argocd', '-o', 'json')
+                        if repeat['metadata']['uid'] != root['metadata']['uid'] or repeat['metadata']['generation'] != root['metadata']['generation']:
+                            raise RuntimeError('Handoff rerun rewrote the root Application')
+                        refused = subprocess.run([str(a) for a in install], capture_output=True, timeout=120)
+                        if refused.returncode == 0 or json.loads((trust / 'gitops.json').read_text())['stage'] != 'gitops-handed-off':
+                            raise RuntimeError('Installer reclaimed handed-off Argo state')
+                        status = run([REPO / 'bin/bareplane', 'status', config_path], capture_output=True, text=True).stdout
+                        if any(line not in status for line in ['kubernetes-ready: true', 'argocd-ready: true', 'gitops-handed-off: true']):
+                            raise RuntimeError('Status did not distinguish verified lifecycle stages')
+                        print('Root handoff verified pinned snapshot then following Git; Argo self-management and read-only rerun passed.', flush=True)
                 if recovery_mode:
                     run([REPO / 'bin/bareplane', 'bootstrap', 'diagnose', config_path])
                     (trust / 'admin.conf').unlink()

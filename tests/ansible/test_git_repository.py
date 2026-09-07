@@ -31,6 +31,7 @@ class FakeCommands:
         self.content = KUSTOMIZATION
         self.commit = COMMIT
         self.fail_fetch = False
+        self.files = None
 
     def run(self, argv, **kwargs):
         self.calls.append(argv)
@@ -40,10 +41,15 @@ class FakeCommands:
             return self.commit.encode()
         if 'ls-tree' in argv:
             filename = argv[-1]
+            if '--name-only' in argv:
+                return ''.join(name + '\0' for name in sorted(self.files or {}) if name.startswith(filename + '/')).encode()
+            if self.files is not None and filename != ROOT and filename not in self.files:
+                return b''
             mode = self.root_mode if filename == ROOT else self.file_mode
             return (mode + COMMIT + '\t' + filename + '\0').encode()
         if 'cat-file' in argv:
-            return str(len(self.content)).encode() if '-s' in argv else self.content
+            content = self.content if self.files is None else self.files[argv[-1].split(':', 1)[1]]
+            return str(len(content)).encode() if '-s' in argv else content
         return b''
 
 
@@ -81,6 +87,28 @@ class GitRepositoryTests(unittest.TestCase):
             with self.subTest(root=root), self.assertRaises(repository.GitOpsError):
                 repository.inspect_repository(self.commands, URL, 'main', root)
         self.assertEqual(self.commands.calls, [])
+
+    def test_handoff_requires_exact_published_payload_and_source_file_set(self):
+        expected = {ROOT + '/kustomization.yaml': KUSTOMIZATION, ROOT + '/applications/argocd.yaml': b'approved application',
+                    'components/argocd/kustomization.yaml': b'approved component'}
+        self.commands.files = dict(expected)
+        self.assertEqual(repository.inspect_repository(self.commands, URL, 'main', ROOT, expected), COMMIT)
+        for change in ['missing', 'modified', 'extra-root', 'extra-component', 'executable']:
+            self.commands.files = dict(expected)
+            self.commands.file_mode = '100644 blob '
+            if change == 'missing':
+                del self.commands.files['components/argocd/kustomization.yaml']
+            elif change == 'modified':
+                self.commands.files['components/argocd/kustomization.yaml'] = b'unapproved bytes!!'
+            elif change == 'extra-root':
+                self.commands.files[ROOT + '/unexpected.yaml'] = b'unapproved'
+            elif change == 'extra-component':
+                self.commands.files['components/argocd/unexpected.yaml'] = b'unapproved'
+            else:
+                self.commands.file_mode = '100755 blob '
+            with self.subTest(change=change), self.assertRaises(repository.GitOpsError):
+                repository.inspect_repository(self.commands, URL, 'main', ROOT, expected)
+            self.assertFalse(list(Path(self.commands.directory).iterdir()))
 
     def test_symlink_submodule_executable_or_missing_root_is_refused(self):
         for mode in ['120000 blob ', '160000 commit ', '100644 blob ', '']:
