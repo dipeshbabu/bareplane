@@ -360,7 +360,6 @@ func commandScanner(binary string) ScanFunc {
 
 func keyscanArguments(host string, port, timeoutSeconds int) []string {
 	return []string{
-		"-q",
 		"-T", strconv.Itoa(timeoutSeconds),
 		"-p", strconv.Itoa(port),
 		"-t", "ecdsa,ed25519,ecdsa-sk,ed25519-sk,rsa",
