@@ -31,6 +31,7 @@ Commands:
   render     Render deterministic Terraform without applying it
   terraform  Run guarded Terraform workflows
   bootstrap  Render or run guarded machine bootstrap workflows
+  gitops     Render user-owned declarative GitOps state
   version    Print build version information
   help       Show this help text
 `
@@ -70,6 +71,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runTerraform(args[1:], stdout, stderr)
 	case "bootstrap":
 		return runBootstrap(args[1:], stdout, stderr)
+	case "gitops":
+		return runGitOps(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n%s", args[0], usage)
 		return 2

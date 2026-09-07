@@ -4,6 +4,7 @@
 
 # Bareplane generated output
 /.bareplane/
+/gitops/
 
 # Go
 *.test
