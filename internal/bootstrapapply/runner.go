@@ -22,11 +22,16 @@ const MaximumLogSize = 4 * 1024 * 1024
 func phaseArguments(request Request) ([]string, error) {
 	valid := false
 	recovery := request.RecoveryID != ""
+	argo := request.Argo != nil
+	if argo {
+		valid = !recovery && request.Phase == "argocd" && validDigest(request.Argo.Contract) &&
+			request.Argo.PayloadDir == filepath.Join(request.StateDir, "argocd-input")
+	}
 	if recovery {
-		valid = validResetID(request.RecoveryID) && (request.Phase == "reset_validate" || request.Phase == "reset_execute")
+		valid = !argo && validResetID(request.RecoveryID) && (request.Phase == "reset_validate" || request.Phase == "reset_execute")
 	}
 	for _, phase := range phases {
-		if !recovery && phase == request.Phase {
+		if !recovery && !argo && phase == request.Phase {
 			valid = true
 		}
 	}
@@ -41,6 +46,13 @@ func phaseArguments(request Request) ([]string, error) {
 	if recovery {
 		variables, _ := json.Marshal(map[string]any{"bareplane_reset_id": request.RecoveryID, "bareplane_reset_scope": "cluster",
 			"bareplane_reset_approved": true, "bareplane_reset_allow_unavailable_api": request.AllowUnavailableAPI})
+		args = append(args, "--extra-vars", string(variables))
+	}
+	if argo {
+		variables, _ := json.Marshal(map[string]any{"bareplane_argocd_approved": true,
+			"bareplane_gitops_repo_url": request.Argo.Repository, "bareplane_gitops_revision": request.Argo.Revision,
+			"bareplane_gitops_root_path": request.Argo.RootPath, "bareplane_argocd_input": request.Argo.PayloadDir,
+			"bareplane_gitops_contract": request.Argo.Contract})
 		args = append(args, "--extra-vars", string(variables))
 	}
 	return append(args, request.Phase+".yaml"), nil

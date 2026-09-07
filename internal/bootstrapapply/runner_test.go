@@ -171,3 +171,47 @@ func TestControlledSSHArgumentIntegration(t *testing.T) {
 		}
 	}
 }
+
+func TestControlledArgoModuleRefusalIntegration(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Argo controller is Linux-only")
+	}
+	binary, err := exec.LookPath("ansible-playbook")
+	if err != nil {
+		if os.Getenv("BAREPLANE_TEST_ANSIBLE") == "1" {
+			t.Fatal(err)
+		}
+		t.Skip("ansible-playbook is not installed")
+	}
+	f := newFixture(t)
+	// Isolate module dependency packaging and its own approval boundary in an
+	// owned temporary fixture. No kubeconfig, Git request, or cluster is accessed.
+	playbook := `- hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - bareplane_argocd:
+        kubeconfig: /unavailable/admin.conf
+        cluster: lab
+        vip: 192.0.2.100
+        version: 1.36.4
+        approved: false
+        repository: https://git.example.com/team/repo.git
+        revision: main
+        root_path: clusters/lab
+        input_dir: /unavailable/argocd-input
+        contract: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+`
+	if err := os.WriteFile(filepath.Join(f.bundle, "argocd.yaml"), []byte(playbook), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	state := filepath.Dir(f.trust)
+	var output bytes.Buffer
+	request := Request{Phase: "argocd", BundleDir: f.bundle, StateDir: state, PrivateKeyFile: f.key, KnownHostsFile: f.trust, Log: &output,
+		Argo: &ArgoRequest{Contract: strings.Repeat("a", 64), PayloadDir: filepath.Join(state, "argocd-input")}}
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	defer cancel()
+	if err := commandRunner(binary)(ctx, request); err == nil || ctx.Err() != nil || !strings.Contains(output.String(), "requires explicit approval") || strings.Contains(output.String(), "Traceback") {
+		t.Fatalf("controlled Argo module refusal failed: %v\n%s", err, output.String())
+	}
+}

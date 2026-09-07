@@ -175,6 +175,7 @@ func TestBundleAnsibleIntegration(t *testing.T) {
 		run(false, "--syntax-check", "site.yaml")
 		run(false, "--syntax-check", "reset_validate.yaml")
 		run(false, "--syntax-check", "reset_execute.yaml")
+		run(false, "--syntax-check", "argocd.yaml")
 		out := run(false, "validate.yaml")
 		if !strings.Contains(out, "1.36.4") || !strings.Contains(out, "Cilium 1.20.1") {
 			t.Fatalf("template preview missing vars: %s", out)

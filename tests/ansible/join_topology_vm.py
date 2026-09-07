@@ -63,6 +63,8 @@ def main():
     work = Path(tempfile.mkdtemp(prefix='bareplane-join-vm-'))
     apply_mode = os.environ.get('BAREPLANE_TEST_BOOTSTRAP_APPLY') == '1'
     recovery_mode = os.environ.get('BAREPLANE_TEST_BOOTSTRAP_RECOVERY') == '1'
+    argocd_mode = os.environ.get('BAREPLANE_TEST_ARGOCD_INSTALL') == '1'
+    single_mode = recovery_mode or argocd_mode
     guests = []
     logs = []
     try:
@@ -84,7 +86,7 @@ def main():
         run(['sudo', 'iptables', '-t', 'nat', '-A', 'POSTROUTING', '-s', '192.0.2.0/24', '!', '-o', 'bp-ci', '-j', 'MASQUERADE'])
         run(['sudo', 'iptables', '-I', 'FORWARD', '-i', 'bp-ci', '-j', 'ACCEPT'])
         run(['sudo', 'iptables', '-I', 'FORWARD', '-o', 'bp-ci', '-j', 'ACCEPT'])
-        names = ['lab-control-1'] if recovery_mode else ['lab-control-1', 'lab-control-2', 'lab-control-3', 'lab-worker-1']
+        names = ['lab-control-1'] if single_mode else ['lab-control-1', 'lab-control-2', 'lab-control-3', 'lab-worker-1']
         hosts = {name: '192.0.2.' + str(11 + index) for index, name in enumerate(names)}
         for index, (name, address) in enumerate(hosts.items()):
             mac = f'52:54:00:12:34:{index + 1:02x}'
@@ -117,7 +119,7 @@ def main():
             log = (vm / 'console.log').open('wb')
             logs.append(log)
             guests.append(subprocess.Popen([
-                'qemu-system-x86_64', '-enable-kvm', '-cpu', 'host', '-smp', '2', '-m', '3072',
+                'qemu-system-x86_64', '-enable-kvm', '-cpu', 'host', '-smp', '2', '-m', '4096' if argocd_mode else '3072',
                 '-nographic', *([] if recovery_mode else ['-no-reboot']), '-drive', f'file={vm / "disk.qcow2"},if=virtio,format=qcow2',
                 '-drive', f'file={vm / "seed.img"},if=virtio,format=raw',
                 '-netdev', f'tap,id=net0,ifname={tap},script=no,downscript=no',
@@ -166,11 +168,19 @@ def main():
         config = yaml.safe_load((REPO / 'examples/bareplane.yaml').read_text())
         config['metadata']['name'] = 'lab'
         spec = config['spec']
-        spec['nodes'] = [dict(name='control', role='control-plane', count=1 if recovery_mode else 3, cpu=2, memoryGB=3, diskGB=24)]
-        if not recovery_mode:
+        spec['nodes'] = [dict(name='control', role='control-plane', count=1 if single_mode else 3, cpu=2, memoryGB=4 if argocd_mode else 3, diskGB=24)]
+        if not single_mode:
             spec['nodes'].append(dict(name='worker', role='worker', count=1, cpu=2, memoryGB=3, diskGB=24))
         spec['features']['gpu'] = False
         spec['profiles'] = ['minimal']
+        if argocd_mode:
+            spec['features']['observability'] = False
+            spec['dns']['provider'] = 'manual'
+            spec['secrets']['provider'] = 'sops'
+            # Public immutable fixture proves Git reachability only. No remote
+            # payload is applied in the installation issue; root handoff is separate.
+            spec['gitops'] = dict(repoURL='https://github.com/dipeshbabu/bareplane.git',
+                                  revision='50561433e64dc3a0d395f0f1ea64d627eb2ff725', rootPath='missing/root')
         spec['bootstrap']['ssh'] = dict(user='root', privateKeyFile=str(key), hosts=hosts)
         spec['kubernetes']['apiVIP'] = '192.0.2.100'
         project = work / ("project 'quoted' \"double\" %h" if apply_mode else 'project')
@@ -204,6 +214,55 @@ def main():
                     raise RuntimeError('A healthy CLI rerun reconfigured completed phases')
                 if (trust / '.operation.lock').exists():
                     raise RuntimeError('Successful apply did not release its operation lock')
+                if argocd_mode:
+                    kubectl = ['kubectl', '--kubeconfig', str(trust / 'admin.conf'), '--request-timeout=10s']
+
+                    def api(*args, data=None):
+                        output = run(kubectl + list(args), input=json.dumps(data).encode() if data is not None else b'', capture_output=True).stdout
+                        return json.loads(output) if output.strip() else {}
+
+                    install = [REPO / 'bin/bareplane', 'gitops', 'install', '--approve', 'lab', config_path]
+
+                    def refuse(reason):
+                        try:
+                            run(install, capture_output=True)
+                        except subprocess.CalledProcessError:
+                            phase = max((trust / 'logs').glob('argocd-*.log'), key=lambda p: p.stat().st_mtime)
+                            if reason not in phase.read_text():
+                                apply_diagnostics(trust)
+                                raise RuntimeError('Argo installation failed outside the expected guard') from None
+                        else:
+                            raise RuntimeError('Unsafe Argo installation was accepted')
+                        if (trust / 'argocd-ownership.json').exists():
+                            raise RuntimeError('Read-only refusal recorded Kubernetes creation intent')
+
+                    run([REPO / 'bin/bareplane', 'gitops', 'render', config_path])
+                    refuse('Configured Git root is missing')
+                    if api('get', 'namespace', 'argocd', '--ignore-not-found', '-o', 'json'):
+                        raise RuntimeError('Missing repository path still created Argo state')
+                    spec['gitops']['rootPath'] = 'internal/render/gitops/assets/argocd'
+                    write_yaml(config_path, config)
+                    run([REPO / 'bin/bareplane', 'gitops', 'render', config_path])
+                    foreign = api('create', 'namespace', 'argocd', '-o', 'json')
+                    refuse('existing unmanaged Argo resource')
+                    current = api('get', 'namespace', 'argocd', '-o', 'json')
+                    if current['metadata']['uid'] != foreign['metadata']['uid'] or current['metadata'].get('annotations', {}).get('bareplane.io/cluster'):
+                        raise RuntimeError('Unmanaged namespace was adopted or replaced')
+                    api('delete', '--raw=/api/v1/namespaces/argocd', '-f', '-', data=dict(apiVersion='v1', kind='DeleteOptions', preconditions=dict(uid=foreign['metadata']['uid'])))
+                    run(kubectl + ['wait', '--for=delete', 'namespace/argocd', '--timeout=90s'])
+                    run(install)
+                    original = json.loads((trust / 'argocd-ownership.json').read_text())
+                    if original['stage'] != 'ready' or len(original['resources']) != 38:
+                        raise RuntimeError('Minimal Argo did not record full owned readiness')
+                    run(install)
+                    current = json.loads((trust / 'argocd-ownership.json').read_text())
+                    if current != original:
+                        raise RuntimeError('Argo rerun changed owned resource identities or content')
+                    if json.loads((trust / 'gitops.json').read_text())['stage'] != 'argocd-ready':
+                        raise RuntimeError('CLI did not record Argo readiness')
+                    if api('get', 'applications,applicationsets', '-n', 'argocd', '-o', 'json')['items']:
+                        raise RuntimeError('Installation performed an unrequested root handoff')
+                    print('Pinned minimal Argo is Ready; public Git and unmanaged namespace guards passed; rerun preserved every resource UID.', flush=True)
                 if recovery_mode:
                     run([REPO / 'bin/bareplane', 'bootstrap', 'diagnose', config_path])
                     (trust / 'admin.conf').unlink()
@@ -236,7 +295,7 @@ def main():
                         print(re.sub(r'[a-z0-9]{6}\.[a-z0-9]{16}|[A-Za-z0-9+/=_-]{32,}', '[redacted]', output[-4000:]), flush=True)
                 apply_diagnostics(trust)
                 raise
-            print('Guarded bootstrap apply formed the real four-node cluster and repeated health only.', flush=True)
+            print('Guarded bootstrap apply formed the real ' + str(len(names)) + '-node cluster and repeated health only.', flush=True)
             return
         (trust / 'known_hosts').write_bytes(known_hosts.read_bytes())
         env = dict(os.environ, ANSIBLE_CONFIG=str(bundle / 'ansible.cfg'), ANSIBLE_NOCOLOR='1')

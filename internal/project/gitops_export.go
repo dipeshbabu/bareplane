@@ -194,3 +194,37 @@ func readExportFile(name string, limit int64) ([]byte, error) {
 	}
 	return data, nil
 }
+
+// RequireGitOpsExport checks the current renderer's complete public payload
+// without creating or replacing anything. Installation must not accept an old
+// but internally consistent export after the configuration changes.
+func RequireGitOpsExport(configPath, cluster string, files map[string][]byte) (string, error) {
+	destination, err := GitOpsExportDirectory(configPath)
+	if err != nil {
+		return "", err
+	}
+	if _, err := InspectBootstrapState(configPath); err != nil {
+		return "", err
+	}
+	if err := verifyGitOpsExport(destination, cluster); err != nil {
+		return "", err
+	}
+	data, err := readExportFile(filepath.Join(destination, gitOpsExportManifest), 1<<20)
+	if err != nil {
+		return "", errors.New("current GitOps export is required; run bareplane gitops render")
+	}
+	var manifest exportManifest
+	if json.Unmarshal(data, &manifest) != nil || len(manifest.Files) != len(files) || len(files) == 0 {
+		return "", errors.New("GitOps export differs from the current renderer; rerender and review it")
+	}
+	for name, expected := range files {
+		if validateGeneratedPath(name, true) != nil || name == gitOpsExportManifest {
+			return "", errors.New("invalid expected GitOps payload")
+		}
+		digest := sha256.Sum256(expected)
+		if manifest.Files[name] != hex.EncodeToString(digest[:]) {
+			return "", errors.New("GitOps export differs from the current configuration or renderer; rerender and publish it")
+		}
+	}
+	return destination, nil
+}

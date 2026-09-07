@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+  annotations:
+    bareplane.io/cluster: lab
+    bareplane.io/component: argocd
+    argocd.argoproj.io/sync-wave: "-30"

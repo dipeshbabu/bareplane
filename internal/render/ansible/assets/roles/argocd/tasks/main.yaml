@@ -1,0 +1,36 @@
+---
+- name: Require the approved public GitOps contract before Argo installation
+  ansible.builtin.assert:
+    that:
+      - bareplane_argocd_approved | default(false) | bool
+      - bareplane_gitops_contract | default('') is match('^[0-9a-f]{64}$')
+      - bareplane_gitops_repo_url is defined
+      - bareplane_gitops_revision is defined
+      - bareplane_gitops_root_path is defined
+      - bareplane_argocd_input is defined
+    quiet: true
+    fail_msg: Run the guarded bareplane gitops install command with exact cluster approval.
+
+- name: Verify public repository and create only the owned minimal Argo resources
+  bareplane_argocd:
+    kubeconfig: "{{ inventory_dir }}/../state/bootstrap/admin.conf"
+    cluster: "{{ bareplane_cluster }}"
+    vip: "{{ bareplane_api_vip }}"
+    version: "{{ bareplane_kubernetes_version }}"
+    approved: "{{ bareplane_argocd_approved }}"
+    repository: "{{ bareplane_gitops_repo_url }}"
+    revision: "{{ bareplane_gitops_revision }}"
+    root_path: "{{ bareplane_gitops_root_path }}"
+    input_dir: "{{ bareplane_argocd_input }}"
+    contract: "{{ bareplane_gitops_contract }}"
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  register: bareplane_argocd_report
+
+- name: Confirm Argo readiness without claiming root handoff
+  ansible.builtin.assert:
+    that: bareplane_argocd_report.ready | default(false)
+    quiet: true
+    fail_msg: Minimal Argo did not become ready; no handoff is permitted.

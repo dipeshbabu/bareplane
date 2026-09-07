@@ -109,7 +109,7 @@ func kustomization(resources ...string) map[string]any {
 }
 
 func application(cfg config.Config, component, sourcePath, wave string) map[string]any {
-	return map[string]any{
+	result := map[string]any{
 		"apiVersion": "argoproj.io/v1alpha1", "kind": "Application",
 		"metadata": map[string]any{
 			"name": ApplicationName(cfg.Metadata.Name, component), "namespace": "argocd",
@@ -126,4 +126,15 @@ func application(cfg config.Config, component, sourcePath, wave string) map[stri
 			},
 		},
 	}
+	if component == "argocd" {
+		// The nonce is controller provenance, not Git desired state. Ignoring
+		// only this annotation lets Argo self-manage without erasing the UID-
+		// bound bootstrap receipt's ownership marker.
+		result["spec"].(map[string]any)["ignoreDifferences"] = []map[string]any{{
+			"group": "*", "kind": "*", "jsonPointers": []string{"/metadata/annotations/bareplane.io~1installation"},
+		}}
+		policy := result["spec"].(map[string]any)["syncPolicy"].(map[string]any)
+		policy["syncOptions"] = append(policy["syncOptions"].([]string), "RespectIgnoreDifferences=true")
+	}
+	return result
 }

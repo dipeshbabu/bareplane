@@ -37,6 +37,7 @@ type Request struct {
 	Log                 io.Writer
 	RecoveryID          string
 	AllowUnavailableAPI bool
+	Argo                *ArgoRequest
 }
 
 type Runner func(context.Context, Request) error
