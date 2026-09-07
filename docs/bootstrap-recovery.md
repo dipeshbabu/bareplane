@@ -30,7 +30,7 @@ Node-specific control-plane/etcd quorum operations are not supported by this ini
 
 The workflow stops kubelet and removes only validated pod sandboxes in dependency order: networked pods first, then Cilium, then static control-plane pods. This keeps the CNI agent available while pod networking is removed. It then uses pinned kubeadm with an explicit CRI socket and certificate directory. For full-cluster abandonment it skips kubeadm's member-removal phase and removes only the validated local `/var/lib/etcd/member` data, avoiding manifest-controlled external data paths. It verifies kubeadm/CRI cleanup instead of treating warning-only output as success.
 
-Only the reviewed bootstrap records, managed kube-vip manifest, and validated Cilium CNI file are cleaned outside kubeadm's normal paths. Containerd/Kubernetes packages, package pins, host preparation configuration, and image caches remain. A reboot clears volatile Cilium interfaces/BPF/runtime state and the temporary API VIP; no blanket iptables flush is performed.
+Only the reviewed bootstrap records, managed kube-vip manifest, and validated Cilium CNI file are cleaned outside kubeadm's normal paths. Containerd/Kubernetes packages, package pins, host preparation configuration, and image caches remain. A reboot clears volatile Cilium interfaces/BPF/runtime state and the temporary API VIP; the workflow waits for time synchronization before allowing rebootstrap. No blanket iptables flush is performed.
 
 Private node diagnostics and configuration intent are preserved under `/var/lib/bareplane/bootstrap/recovery/<reset-id>`. Local reset metadata is preserved under `.bareplane/state/bootstrap/recovery/reset-<reset-id>`. These are sensitive diagnostic archives, not application or etcd backups.
 

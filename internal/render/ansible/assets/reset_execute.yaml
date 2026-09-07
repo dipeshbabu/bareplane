@@ -19,6 +19,13 @@
     - name: Verify reboot and record node reset completion
       bareplane_reset:
       args: "{{ bareplane_reset_parameters | combine({'operation': 'finish'}) }}"
+    - name: Wait for the preserved time service before allowing rebootstrap
+      ansible.builtin.command: timedatectl show -p NTPSynchronized --value
+      changed_when: false
+      register: bareplane_reset_time
+      until: bareplane_reset_time.stdout == 'yes'
+      retries: 60
+      delay: 2
 
 - name: Withdraw only the matching project-local admin credential
   hosts: "control_plane[0]"
