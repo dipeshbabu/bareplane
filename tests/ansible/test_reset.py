@@ -23,6 +23,15 @@ helpers = load('join_helpers', root / 'module_utils/bareplane_join_state.py')
 
 
 class ResetTests(unittest.TestCase):
+    def test_only_identified_health_probe_sandboxes_are_owned(self):
+        nonce = 'a' * 16
+        sandbox = dict(id='fixture', metadata=dict(name='server', namespace='bareplane-health-' + nonce),
+                       annotations={'bareplane.io/health-run': nonce, 'bareplane.io/cluster': 'lab'})
+        self.assertTrue(reset.owned_probe_sandbox(sandbox, 'lab'))
+        self.assertFalse(reset.owned_probe_sandbox(sandbox, 'other'))
+        sandbox['annotations'] = {}
+        self.assertFalse(reset.owned_probe_sandbox(sandbox, 'lab'))
+
     def test_containerd_config_ids_resolve_only_to_pinned_image_aliases(self):
         image = 'sha256:' + 'a' * 64
         allowed = {'registry.k8s.io/kube-apiserver:v1.36.4'}

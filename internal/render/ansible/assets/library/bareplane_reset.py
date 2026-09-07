@@ -14,6 +14,8 @@ import tempfile
 
 STATE = '/var/lib/bareplane/bootstrap'
 RECEIPT = STATE + '/reset-receipt.json'
+PROBE_DIGEST = 'sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0'
+PROBE_IMAGES = {'docker.io/library/busybox:1.37.0@' + PROBE_DIGEST, 'docker.io/library/busybox@' + PROBE_DIGEST}
 OWNED_STATE = ['init-intent', 'init-ca-sha256', 'kubeadm.yaml', 'init-output', 'join-intent', 'join-complete',
                'join.yaml', 'join-output', 'cilium-intent', 'cilium-complete', 'cilium-values.yaml']
 KUBE_FILES = {'admin.conf', 'super-admin.conf', 'kubelet.conf', 'bootstrap-kubelet.conf', 'controller-manager.conf',
@@ -48,6 +50,13 @@ def approved_image_reference(image, images, prefixes):
     if status.get('id') != image:
         return False
     return any(named(alias) for alias in status.get('repoTags', []) + status.get('repoDigests', []))
+
+
+def owned_probe_sandbox(sandbox, cluster):
+    metadata, annotations = sandbox.get('metadata', {}), sandbox.get('annotations', {})
+    nonce = annotations.get('bareplane.io/health-run', '')
+    return (re.fullmatch(r'[a-f0-9]{16}', nonce) is not None and annotations.get('bareplane.io/cluster') == cluster
+            and metadata.get('namespace') == 'bareplane-health-' + nonce and metadata.get('name') in ['server', 'client'])
 
 
 def snapshot(path, helpers):
@@ -98,10 +107,11 @@ def inspect(p, helpers):
     namespaces = command(['ctr', 'namespaces', 'list', '-q']).decode().splitlines()
     require(set(namespaces) <= {'k8s.io'}, 'Unmanaged containerd namespaces block bootstrap reset')
     sandboxes = json.loads(command(['crictl', 'pods', '-o', 'json'])).get('items', [])
+    probe_ids = {sandbox.get('id') for sandbox in sandboxes if owned_probe_sandbox(sandbox, p['cluster'])}
     for sandbox in sandboxes:
         metadata = sandbox.get('metadata', {})
-        require(metadata.get('namespace') == 'kube-system' and metadata.get('name', '').startswith(
-                ('kube-apiserver-', 'kube-controller-manager-', 'kube-scheduler-', 'etcd-', 'kube-vip-', 'cilium-', 'coredns-')),
+        require(sandbox.get('id') in probe_ids or (metadata.get('namespace') == 'kube-system' and metadata.get('name', '').startswith(
+                ('kube-apiserver-', 'kube-controller-manager-', 'kube-scheduler-', 'etcd-', 'kube-vip-', 'cilium-', 'coredns-'))),
                 'Unmanaged CRI pod sandboxes block bootstrap reset')
     images = set(command(['kubeadm', 'config', 'images', 'list', '--kubernetes-version', 'v' + p['kubernetes_version']]).decode().splitlines())
     prefixes = ['quay.io/cilium/cilium:v' + p['cilium_version'], 'quay.io/cilium/operator-generic:v' + p['cilium_version'],
@@ -109,9 +119,11 @@ def inspect(p, helpers):
     checked_images = {}
     for container in json.loads(command(['crictl', 'ps', '-a', '-o', 'json'])).get('containers', []):
         image = container.get('image', {}).get('image', '')
-        if image not in checked_images:
-            checked_images[image] = approved_image_reference(image, images, prefixes)
-        require(checked_images[image], 'Unrecognized container images block bootstrap reset')
+        probe = container.get('podSandboxId') in probe_ids
+        key = (image, probe)
+        if key not in checked_images:
+            checked_images[key] = approved_image_reference(image, PROBE_IMAGES if probe else images, [] if probe else prefixes)
+        require(checked_images[key], 'Unrecognized container images block bootstrap reset')
     for path in ['/etc/kubernetes', '/etc/kubernetes/manifests', '/etc/kubernetes/pki', '/var/lib/kubelet',
                  '/var/lib/etcd', '/etc/cni/net.d', '/var/lib/bareplane', STATE]:
         helpers.checked_path(path, directory=True)
