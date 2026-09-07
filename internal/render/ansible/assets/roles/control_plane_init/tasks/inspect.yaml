@@ -16,7 +16,7 @@
   ansible.builtin.stat:
     path: "{{ item }}"
     follow: false
-  loop: [/etc/kubernetes, /etc/kubernetes/manifests, /var/lib, /var/lib/bareplane, /var/lib/bareplane/bootstrap]
+  loop: [/etc/kubernetes, /etc/kubernetes/manifests, /etc/kubernetes/pki, /var/lib, /var/lib/bareplane, /var/lib/bareplane/bootstrap]
   register: bareplane_init_directories
 
 - name: Refuse redirected initialization directories
@@ -33,7 +33,7 @@
     path: "{{ item }}"
     follow: false
     checksum_algorithm: sha256
-  loop: [/etc/kubernetes/.bareplane-init-complete, /var/lib/bareplane/bootstrap/init-intent, /var/lib/bareplane/bootstrap/kubeadm.yaml, /var/lib/bareplane/bootstrap/init-output]
+  loop: [/etc/kubernetes/.bareplane-init-complete, /var/lib/bareplane/bootstrap/init-intent, /var/lib/bareplane/bootstrap/kubeadm.yaml, /var/lib/bareplane/bootstrap/init-output, /var/lib/bareplane/bootstrap/init-ca-sha256]
   register: bareplane_init_files
 
 - name: Refuse redirected initialization files
@@ -50,12 +50,21 @@
     bareplane_init_done: "{{ bareplane_init_files.results[0].stat.exists }}"
     bareplane_init_digest: "{{ lookup('ansible.builtin.template', 'kubeadm.yaml.j2') | hash('sha256') }}"
 
+- name: Inspect the public CA identity without reading private keys
+  ansible.builtin.stat:
+    path: /etc/kubernetes/pki/ca.crt
+    follow: false
+    checksum_algorithm: sha256
+  register: bareplane_init_ca
+
 - name: Verify completed initialization belongs to this cluster and configuration
   ansible.builtin.assert:
     that:
       - bareplane_init_files.results[0].stat.checksum | default('') == ((bareplane_cluster ~ '\n') | hash('sha256'))
       - bareplane_init_files.results[1].stat.checksum | default('') == ((bareplane_init_digest ~ '\n') | hash('sha256'))
       - bareplane_init_files.results[2].stat.checksum | default('') == bareplane_init_digest
+      - bareplane_init_ca.stat.isreg | default(false) and not bareplane_init_ca.stat.islnk | default(false)
+      - bareplane_init_files.results[4].stat.checksum | default('') == (((bareplane_init_ca.stat.checksum | default('')) ~ '\n') | hash('sha256'))
     quiet: true
     fail_msg: Completed initialization differs from the requested cluster or configuration; use recovery or upgrade planning.
   when: bareplane_init_done
@@ -66,6 +75,7 @@
       - not bareplane_init_files.results[1].stat.exists
       - not bareplane_init_files.results[2].stat.exists
       - not bareplane_init_files.results[3].stat.exists
+      - not bareplane_init_files.results[4].stat.exists
     quiet: true
     fail_msg: A previous initialization attempt is incomplete. Inspect private bootstrap state and use explicit recovery; no automatic retry or reset is allowed.
   when: not bareplane_init_done

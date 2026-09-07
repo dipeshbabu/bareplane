@@ -1,6 +1,8 @@
 #!/usr/bin/python
 """Read-only, secret-free join identity and ownership checks."""
+import base64
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -95,14 +97,35 @@ def decide(identity, node, intent, complete, local_ca, kubelet):
     return 'complete' if complete is not None else 'finalize'
 
 
-def inspect_primary(cluster):
+def validate_admin(doc, cluster, ca_sha256, vip):
+    if any(len(doc.get(field, [])) != 1 for field in ['clusters', 'users', 'contexts']):
+        raise ValueError('Primary admin configuration has ambiguous cluster identity')
+    entry, user, context = doc['clusters'][0], doc['users'][0], doc['contexts'][0]
+    address = ipaddress.ip_address(vip)
+    server = 'https://' + ('[' + str(address) + ']' if address.version == 6 else str(address)) + ':6443'
+    if (entry['name'] != cluster or context['context'] != dict(cluster=cluster, user=user['name'])
+            or doc.get('current-context') != context['name'] or entry['cluster'].get('server') != server
+            or set(entry['cluster']) != {'server', 'certificate-authority-data'}
+            or set(user['user']) != {'client-certificate-data', 'client-key-data'}
+            or hashlib.sha256(base64.b64decode(entry['cluster']['certificate-authority-data'], validate=True)).hexdigest() != ca_sha256):
+        raise ValueError('Primary admin configuration differs from the initialized cluster CA or VIP')
+
+
+def inspect_primary(cluster, require_cilium=True, vip=None):
     if read_file('/etc/kubernetes/.bareplane-init-complete') != (cluster + '\n').encode():
         raise ValueError('The primary was not initialized by this Bareplane cluster')
-    if read_file(STATE + '/cilium-complete') is None:
+    if require_cilium and read_file(STATE + '/cilium-complete') is None:
         raise ValueError('Bootstrap-owned Cilium must be complete before joining nodes')
     ca = read_file(CA)
     if not ca:
         raise ValueError('The primary cluster CA is missing')
+    if read_file(STATE + '/init-ca-sha256') != (hashlib.sha256(ca).hexdigest() + '\n').encode():
+        raise ValueError('Primary CA differs from initialized Bareplane state; explicit recovery is required')
+    if not checked_path('/etc/kubernetes/admin.conf'):
+        raise ValueError('The primary admin configuration is missing')
+    private_path('/etc/kubernetes/admin.conf')
+    admin = json.loads(run(['kubectl', '--kubeconfig', '/etc/kubernetes/admin.conf', 'config', 'view', '--raw', '-o', 'json']))
+    validate_admin(admin, cluster, hashlib.sha256(ca).hexdigest(), vip)
     pubkey = run(['openssl', 'x509', '-pubkey', '-noout'], ca)
     der = run(['openssl', 'pkey', '-pubin', '-outform', 'DER'], pubkey)
     return dict(ca_sha256=hashlib.sha256(ca).hexdigest(), discovery_hash='sha256:' + hashlib.sha256(der).hexdigest())
@@ -154,13 +177,14 @@ def inspect_node(identity, node):
 def main():
     from ansible.module_utils.basic import AnsibleModule
     module = AnsibleModule(argument_spec=dict(
-        operation=dict(type='str', choices=['primary', 'node', 'verify'], required=True),
+        operation=dict(type='str', choices=['primary', 'initialized', 'node', 'verify'], required=True),
         cluster=dict(type='str'), identity=dict(type='dict'), node=dict(type='dict', default={}),
+        vip=dict(type='str'),
     ), supports_check_mode=True)
     try:
         p = module.params
-        if p['operation'] == 'primary':
-            result = inspect_primary(p['cluster'])
+        if p['operation'] in ['primary', 'initialized']:
+            result = inspect_primary(p['cluster'], require_cilium=p['operation'] == 'primary', vip=p['vip'])
         elif p['operation'] == 'verify':
             verify_node(p['node'], p['identity'], ready=True)
             result = dict(uid=p['node']['metadata']['uid'])

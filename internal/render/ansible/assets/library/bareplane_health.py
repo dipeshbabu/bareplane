@@ -4,6 +4,7 @@ import hashlib
 import ipaddress
 import json
 import secrets
+import signal
 import subprocess
 import time
 
@@ -231,6 +232,11 @@ def main():
         version=dict(type='str', required=True), control_planes=dict(type='list', elements='str', required=True),
         workers=dict(type='list', elements='str', required=True),
     ), supports_check_mode=True)
+
+    def interrupted(signum, frame):
+        raise HealthError('Bootstrap health verification was interrupted')
+
+    signal.signal(signal.SIGTERM, interrupted)
     try:
         if module.check_mode:
             raise HealthError('Full bootstrap health requires temporary workloads; check mode is unsupported')

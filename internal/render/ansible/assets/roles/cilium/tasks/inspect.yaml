@@ -1,4 +1,10 @@
 ---
+- name: Verify the initialized cluster CA before installing networking
+  bareplane_join_state:
+    operation: initialized
+    cluster: "{{ bareplane_cluster }}"
+    vip: "{{ bareplane_api_vip }}"
+
 - name: Read controller architecture
   ansible.builtin.setup:
     gather_subset: ['!all', min]

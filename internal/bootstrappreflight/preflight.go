@@ -60,6 +60,13 @@ type Options struct {
 	Runner            Runner
 	UserHomeDir       UserHomeDirFunc
 	ResolveKnownHosts TrustResolver
+	// Preparation is set only by the approved bootstrap orchestrator: managed
+	// host preparation disables ordinary swap after this suitability check.
+	Preparation bool
+	// Resume allows existing Kubernetes paths only after the orchestrator has
+	// verified its private progress/config/trust binding. Phase ownership guards
+	// remain authoritative; this does not adopt or reset existing cluster state.
+	Resume bool
 }
 
 // Facts is the bounded, parsed host state used for readiness classification.
@@ -120,6 +127,9 @@ func Inspect(ctx context.Context, options Options) doctor.Report {
 	if err != nil {
 		return failedReport("ssh-known-hosts", err.Error())
 	}
+	if strings.Contains(knownHosts, "${") || strings.ContainsAny(knownHosts, "\x00\r\n\t") {
+		return failedReport("ssh-known-hosts", "known-hosts paths must not contain control characters or OpenSSH environment expansions")
+	}
 	privateKey, err := resolvePrivateKey(options.ConfigPath, cfg.Spec.Bootstrap.SSH.PrivateKeyFile, options.UserHomeDir)
 	if err != nil {
 		return failedReport("ssh-private-key", err.Error())
@@ -178,7 +188,7 @@ func Inspect(ctx context.Context, options Options) doctor.Report {
 			results = append(results, doctor.Result{Name: observation.machine.Name, Status: doctor.StatusFail, Message: observation.err.Error()})
 			continue
 		}
-		results = append(results, evaluate(observation.machine, observation.facts, hostnameCounts[strings.ToLower(observation.facts.Hostname)] > 1))
+		results = append(results, evaluateWithPolicy(observation.machine, observation.facts, hostnameCounts[strings.ToLower(observation.facts.Hostname)] > 1, options.Preparation, options.Resume))
 	}
 	return doctor.Report{Results: results}
 }
@@ -236,7 +246,16 @@ func resolvePrivateKey(configPath, configured string, homeDir UserHomeDirFunc) (
 	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
 		return "", errors.New("configured private key permissions must be 0600 or stricter")
 	}
+	if strings.Contains(path, "${") {
+		return "", errors.New("private-key paths must not contain OpenSSH environment expansions")
+	}
 	return path, nil
+}
+
+// ResolvePrivateKey applies the same read-only path and permission checks used
+// by authenticated preflight without reading or returning key contents.
+func ResolvePrivateKey(configPath, configured string, homeDir UserHomeDirFunc) (string, error) {
+	return resolvePrivateKey(configPath, configured, homeDir)
 }
 
 func safeRunnerError(runErr, contextErr error) error {
@@ -291,8 +310,9 @@ func sshArguments(request Request, timeoutSeconds int) []string {
 		"-F", nullDevice,
 		"-o", "BatchMode=yes",
 		"-o", "IdentitiesOnly=yes",
+		"-o", "IdentityAgent=none",
 		"-o", "StrictHostKeyChecking=yes",
-		"-o", "UserKnownHostsFile=" + request.KnownHostsFile,
+		"-o", "UserKnownHostsFile=" + strconv.Quote(strings.ReplaceAll(request.KnownHostsFile, "%", "%%")),
 		"-o", "GlobalKnownHostsFile=" + nullDevice,
 		"-o", "PasswordAuthentication=no",
 		"-o", "KbdInteractiveAuthentication=no",
@@ -306,7 +326,7 @@ func sshArguments(request Request, timeoutSeconds int) []string {
 		"-o", "PermitLocalCommand=no",
 		"-o", "ControlMaster=no",
 		"-o", "LogLevel=ERROR",
-		"-i", request.PrivateKeyFile,
+		"-i", strings.ReplaceAll(request.PrivateKeyFile, "%", "%%"),
 		"-p", strconv.Itoa(request.Port),
 		"-l", request.User,
 		request.Host,
@@ -447,6 +467,10 @@ func parseBool(value string) (bool, bool) {
 }
 
 func evaluate(machine topology.Machine, facts Facts, duplicateHostname bool) doctor.Result {
+	return evaluateWithPolicy(machine, facts, duplicateHostname, false, false)
+}
+
+func evaluateWithPolicy(machine topology.Machine, facts Facts, duplicateHostname, preparation, resume bool) doctor.Result {
 	failures := make([]string, 0)
 	warnings := make([]string, 0)
 	arch := normalizeArchitecture(facts.Architecture)
@@ -479,7 +503,11 @@ func evaluate(machine topology.Machine, facts Facts, duplicateHostname bool) doc
 		failures = append(failures, "requires at least 10 GiB free disk")
 	}
 	if facts.SwapBytes > 0 {
-		failures = append(failures, "swap is enabled")
+		if preparation {
+			warnings = append(warnings, "ordinary swap must be disabled by the owned preparation phase")
+		} else {
+			failures = append(failures, "swap is enabled")
+		}
 	}
 	if facts.TimeSynchronized != "true" {
 		failures = append(failures, "time synchronization is not confirmed")
@@ -488,7 +516,11 @@ func evaluate(machine topology.Machine, facts Facts, duplicateHostname bool) doc
 		failures = append(failures, "non-interactive sudo is unavailable")
 	}
 	if facts.CNI || facts.KubernetesPKI || facts.KubernetesDir || facts.ClusterState {
-		failures = append(failures, "existing Kubernetes or CNI state was detected")
+		if resume {
+			warnings = append(warnings, "existing Kubernetes state requires the resumed phase's ownership checks")
+		} else {
+			failures = append(failures, "existing Kubernetes or CNI state was detected")
+		}
 	}
 	if machine.GPU && !facts.GPU {
 		failures = append(failures, "GPU intent has no matching PCI display controller")

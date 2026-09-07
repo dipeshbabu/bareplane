@@ -46,6 +46,8 @@ func Inspect(options Options) doctor.Report {
 		toolResult("ssh", options.LookPath),
 		toolResult("ssh-keyscan", options.LookPath),
 		toolResult("ansible-playbook", options.LookPath),
+		toolResult("kubectl", options.LookPath),
+		toolResult("openssl", options.LookPath),
 	)
 	return doctor.Report{Results: results}
 }

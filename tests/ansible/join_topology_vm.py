@@ -5,6 +5,7 @@ Never invokes roles against the runner or an operator's configured machines.
 Cloud-init host keys are generated here and pinned before the first SSH request.
 """
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -40,6 +41,19 @@ def boot_diagnostics(work, name):
         print(re.sub(r'[A-Za-z0-9+/=_-]{48,}', '[redacted]', line)[:500], flush=True)
 
 
+def apply_diagnostics(state):
+    # Only selected, bounded, redacted error lines from disposable CI guests.
+    # Never upload raw phase logs or kubeadm's private node-local output.
+    logs = sorted((state / 'logs').glob('*.log'), key=lambda path: path.stat().st_mtime)
+    for path in logs[-2:]:
+        with path.open('rb') as stream:
+            data = stream.read(4 * 1024 * 1024).decode(errors='replace')
+        lines = [line for line in data.splitlines() if re.search(r'^TASK |^\[ERROR\]|^fatal:|"msg":|"assertion":|"evaluated_to":', line)]
+        for line in lines[-30:]:
+            line = re.sub(r'[a-z0-9]{6}\.[a-z0-9]{16}|[A-Za-z0-9+/=_-]{32,}', '[redacted]', line)
+            print(line[:600], flush=True)
+
+
 def main():
     if os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('BAREPLANE_DISPOSABLE_VM') != '1':
         raise SystemExit('This mutating harness is restricted to disposable GitHub Actions runners')
@@ -47,6 +61,7 @@ def main():
         raise SystemExit('KVM is required; emulation is not an acceptance substitute')
     os.umask(0o077)
     work = Path(tempfile.mkdtemp(prefix='bareplane-join-vm-'))
+    apply_mode = os.environ.get('BAREPLANE_TEST_BOOTSTRAP_APPLY') == '1'
     guests = []
     logs = []
     try:
@@ -127,6 +142,13 @@ def main():
                         raise RuntimeError('Guest did not become SSH-ready: ' + name) from None
                     time.sleep(3)
             ssh(name, 'apt-get update -qq && apt-get install -y -qq python3-apt sudo')
+            if apply_mode:
+                ssh(name, 'timedatectl set-ntp true')
+                deadline = time.monotonic() + 120
+                while ssh(name, 'timedatectl show -p NTPSynchronized --value', capture_output=True, text=True).stdout.strip() != 'yes':
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError('Disposable guest did not synchronize its clock: ' + name)
+                    time.sleep(2)
 
         config = yaml.safe_load((REPO / 'examples/bareplane.yaml').read_text())
         config['metadata']['name'] = 'lab'
@@ -137,11 +159,47 @@ def main():
         spec['profiles'] = ['minimal']
         spec['bootstrap']['ssh'] = dict(user='root', privateKeyFile=str(key), hosts=hosts)
         spec['kubernetes']['apiVIP'] = '192.0.2.100'
-        write_yaml(work / 'bareplane.yaml', config)
-        run([REPO / 'bin/bareplane', 'bootstrap', 'render', work / 'bareplane.yaml'])
-        bundle = work / '.bareplane/bootstrap'
-        trust = work / '.bareplane/state/bootstrap'
-        trust.mkdir(parents=True)
+        project = work / ("project 'quoted' %h" if apply_mode else 'project')
+        project.mkdir()
+        if apply_mode:
+            controller_key = project / 'private-key'
+            controller_key.write_bytes(key.read_bytes())
+            controller_key.chmod(0o600)
+            spec['bootstrap']['ssh']['privateKeyFile'] = str(controller_key)
+        config_path = project / 'bareplane.yaml'
+        write_yaml(config_path, config)
+        run([REPO / 'bin/bareplane', 'bootstrap', 'render', config_path])
+        bundle = project / '.bareplane/bootstrap'
+        trust = project / '.bareplane/state/bootstrap'
+        trust.mkdir(parents=True, exist_ok=True)
+        if apply_mode:
+            # SSH readiness above already pinned these generated VM host keys.
+            # Exercise the real explicit trust workflow for the CLI test.
+            run([REPO / 'bin/bareplane', 'bootstrap', 'trust', config_path], input=b'lab\n')
+            command = [REPO / 'bin/bareplane', 'bootstrap', 'apply', '--approve', 'lab', config_path]
+            try:
+                run(command)
+                progress = json.loads((trust / 'progress.json').read_text())
+                if progress['completed'] != 8 or progress['active']:
+                    raise RuntimeError('Successful apply did not record complete progress')
+                repeat = run(command, capture_output=True, text=True).stdout
+                print(repeat, flush=True)
+                checked = re.findall(r'^CHECK\s+(\S+)', repeat, re.M)
+                passed = re.findall(r'^PASS\s+(\S+)', repeat, re.M)
+                if checked != ['health'] or passed != ['health']:
+                    raise RuntimeError('A healthy CLI rerun reconfigured completed phases')
+                if (trust / '.operation.lock').exists():
+                    raise RuntimeError('Successful apply did not release its operation lock')
+            except subprocess.SubprocessError as error:
+                for output in [getattr(error, 'stdout', None), getattr(error, 'stderr', None)]:
+                    if output:
+                        if isinstance(output, bytes):
+                            output = output.decode(errors='replace')
+                        print(re.sub(r'[a-z0-9]{6}\.[a-z0-9]{16}|[A-Za-z0-9+/=_-]{32,}', '[redacted]', output[-4000:]), flush=True)
+                apply_diagnostics(trust)
+                raise
+            print('Guarded bootstrap apply formed the real four-node cluster and repeated health only.', flush=True)
+            return
         (trust / 'known_hosts').write_bytes(known_hosts.read_bytes())
         env = dict(os.environ, ANSIBLE_CONFIG=str(bundle / 'ansible.cfg'), ANSIBLE_NOCOLOR='1')
 

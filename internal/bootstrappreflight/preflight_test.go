@@ -255,7 +255,7 @@ func TestSSHArgumentsEnforceProjectTrustAndDisableFallbacks(t *testing.T) {
 	args := sshArguments(request, 7)
 	joined := strings.Join(args, " ")
 	for _, expected := range []string{
-		"BatchMode=yes", "IdentitiesOnly=yes", "StrictHostKeyChecking=yes", "UserKnownHostsFile=/project/known_hosts",
+		"BatchMode=yes", "IdentitiesOnly=yes", "IdentityAgent=none", "StrictHostKeyChecking=yes", `UserKnownHostsFile="/project/known_hosts"`,
 		"GlobalKnownHostsFile=", "PasswordAuthentication=no", "KbdInteractiveAuthentication=no", "PubkeyAuthentication=yes", "PreferredAuthentications=publickey",
 		"ConnectionAttempts=1", "ConnectTimeout=7", "ClearAllForwardings=yes", "ForwardAgent=no", "ForwardX11=no",
 		"PermitLocalCommand=no", "ControlMaster=no", "-i /secret/key", "-p 2222", "-l debian", "2001:db8::10 sh -s",
