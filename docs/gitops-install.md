@@ -37,7 +37,7 @@ The separate private `gitops.json` record moves from `installing` to `argocd-rea
 
 Before root handoff, Bareplane owns creation of this minimal control plane. After handoff, Argo self-manages the same desired state from the user repository; Bareplane must not compete with its reconciliation. The Argo child Application ignores and preserves only the `bareplane.io/installation` provenance annotation. This does not ignore workload configuration, credentials, child Application specs, or broad resource differences.
 
-Successful installation reports **Argo ready**, not **GitOps handed off**. The next phase must verify the published payload and Argo reconciliation before declaring the ownership transition complete. Bootstrap reset intentionally refuses an Argo/platform-bearing cluster; application-aware removal, backup, and recovery remain lifecycle work.
+Successful installation reports **Argo ready**, not **GitOps handed off**. Use the [guarded root handoff](gitops-handoff.md) to verify the published payload and Argo reconciliation before declaring the ownership transition complete. Bootstrap reset intentionally refuses an Argo/platform-bearing cluster; application-aware removal, backup, and recovery remain lifecycle work.
 
 ## Acceptance coverage
 

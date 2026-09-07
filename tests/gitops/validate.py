@@ -8,6 +8,7 @@ only the reviewed, commit-pinned public JSON schemas. No credentials are used.
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -159,7 +160,9 @@ def main():
         summary = json.loads(output)["summary"]
         assert summary["invalid"] == 0 and summary["errors"] == 0 and summary["skipped"] == 0
         assert summary["valid"] + len(definitions) == len(documents)
-        print(f"Validated {len(documents)} Kubernetes resources and {len(applications)} strict Argo Applications; deterministic export and Kustomize patches passed")
+        run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests/ansible', '-p', 'test_handoff_state.py'],
+            env=dict(os.environ, BAREPLANE_TEST_KUBECTL=kubectl))
+        print(f"Validated {len(documents)} Kubernetes resources and {len(applications)} strict Argo Applications; deterministic export, root commit pinning, and Kustomize patches passed")
 
 
 if __name__ == "__main__":

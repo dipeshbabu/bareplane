@@ -1,0 +1,11 @@
+---
+- import_playbook: health.yaml
+
+- name: Verify the published snapshot and hand root reconciliation to Argo
+  hosts: "control_plane[0]"
+  gather_facts: false
+  any_errors_fatal: true
+  roles:
+    - role: contract
+      tags: [always]
+    - role: handoff

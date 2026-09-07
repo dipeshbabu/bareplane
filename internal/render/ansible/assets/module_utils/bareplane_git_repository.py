@@ -1,5 +1,6 @@
 """Bounded, credential-free HTTPS Git inspection; no checkout or hooks."""
 
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -101,7 +102,7 @@ def validate_contract(repository, revision, root):
             'Git root path must be a safe repository-relative directory')
 
 
-def inspect_repository(commands, repository, revision, root):
+def inspect_repository(commands, repository, revision, root, expected_files=None):
     validate_contract(repository, revision, root)
     temporary = Path(tempfile.mkdtemp(prefix='repository-', dir=commands.directory))
     try:
@@ -137,6 +138,31 @@ def inspect_repository(commands, repository, revision, root):
         require(all(isinstance(item, str) and item and all(re.fullmatch(r'[a-z0-9][a-z0-9_.-]*', part)
                     and part not in {'.', '..'} for part in item.split('/')) for item in document['resources']),
                 'Git root resources must be portable local repository paths')
+        if expected_files is not None:
+            require(isinstance(expected_files, dict) and 0 < len(expected_files) <= 4096,
+                    'Expected GitOps payload inventory is invalid')
+            directories = {root}
+            for name, expected in sorted(expected_files.items()):
+                require(isinstance(name, str) and all(re.fullmatch(r'[a-z0-9][a-z0-9_.-]*', p) and p not in {'.', '..'} for p in name.split('/')),
+                        'Expected GitOps payload path is invalid')
+                require(isinstance(expected, bytes) and len(expected) <= 4 * 1024 * 1024, 'Expected GitOps payload is oversized')
+                if name.startswith('components/'):
+                    require(len(name.split('/')) >= 3, 'Component payload needs an explicit component directory')
+                    directories.add('/'.join(name.split('/')[:2]))
+                entry = commands.run(base + ['ls-tree', '-z', commit, '--', name], git=True).decode()
+                require(entry.startswith('100644 blob ') and entry.endswith('\t' + name + '\0') and entry.count('\0') == 1,
+                        'Published GitOps payload is missing, executable, or redirected: ' + name)
+                length = commands.run(base + ['cat-file', '-s', commit + ':' + name], git=True).decode().strip()
+                require(length.isdigit() and int(length) == len(expected), 'Published GitOps payload differs from the approved render: ' + name)
+                actual = commands.run(base + ['cat-file', 'blob', commit + ':' + name], limit=max(1, len(expected)), git=True)
+                require(hashlib.sha256(actual).digest() == hashlib.sha256(expected).digest(),
+                        'Published GitOps payload differs from the approved render: ' + name)
+            for directory in sorted(directories):
+                listed = commands.run(base + ['ls-tree', '-r', '--name-only', '-z', commit, '--', directory], limit=512 * 1024, git=True).decode()
+                names = listed.split('\0')[:-1] if listed.endswith('\0') else []
+                expected = {name for name in expected_files if name.startswith(directory + '/')}
+                require(set(names) == expected and len(names) == len(expected),
+                        'Published GitOps source directory contains unexpected or missing files: ' + directory)
         return commit
     except (UnicodeError, KeyError, TypeError, OSError, RecursionError, yaml.YAMLError):
         raise GitOpsError('Cannot safely inspect the configured public Git repository') from None

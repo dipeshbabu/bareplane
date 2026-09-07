@@ -1,0 +1,34 @@
+---
+- name: Require the approved handoff contract
+  ansible.builtin.assert:
+    that:
+      - bareplane_handoff_approved | default(false) | bool
+      - bareplane_handoff_contract | default('') is match('^[0-9a-f]{64}$')
+      - bareplane_gitops_contract | default('') is match('^[0-9a-f]{64}$')
+    quiet: true
+    fail_msg: Run the guarded bareplane gitops handoff command with exact approval.
+
+- name: Apply only the owned root and verify Argo reconciliation
+  bareplane_handoff:
+    kubeconfig: "{{ inventory_dir }}/../state/bootstrap/admin.conf"
+    cluster: "{{ bareplane_cluster }}"
+    vip: "{{ bareplane_api_vip }}"
+    version: "{{ bareplane_kubernetes_version }}"
+    approved: "{{ bareplane_handoff_approved }}"
+    repository: "{{ bareplane_gitops_repo_url }}"
+    revision: "{{ bareplane_gitops_revision }}"
+    root_path: "{{ bareplane_gitops_root_path }}"
+    input_dir: "{{ bareplane_argocd_input }}"
+    contract: "{{ bareplane_handoff_contract }}"
+    argo_contract: "{{ bareplane_gitops_contract }}"
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  register: bareplane_handoff_report
+
+- name: Require verified ownership handoff
+  ansible.builtin.assert:
+    that: bareplane_handoff_report.handed_off | default(false)
+    quiet: true
+    fail_msg: Argo reconciliation was not verified; inspect private handoff intent.

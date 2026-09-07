@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dipeshbabu/bareplane/internal/bootstrapapply"
 	"github.com/dipeshbabu/bareplane/internal/project"
 )
 
@@ -115,6 +116,23 @@ func TestInspectReportsOperationLock(t *testing.T) {
 	}
 	if !strings.Contains(report.Next, "terraform-plan") {
 		t.Fatalf("next = %q", report.Next)
+	}
+}
+
+func TestNextStepDistinguishesRecordedKubernetesArgoAndHandoffStates(t *testing.T) {
+	for _, test := range []struct {
+		readiness bootstrapapply.Readiness
+		want      string
+	}{
+		{bootstrapapply.Readiness{BootstrapPresent: true}, "bootstrap apply"},
+		{bootstrapapply.Readiness{BootstrapPresent: true, KubernetesReady: true}, "gitops install"},
+		{bootstrapapply.Readiness{BootstrapPresent: true, KubernetesReady: true, ArgoReady: true}, "gitops handoff"},
+		{bootstrapapply.Readiness{BootstrapPresent: true, KubernetesReady: true, ArgoReady: true, HandedOff: true}, "Argo owns"},
+		{bootstrapapply.Readiness{Problem: "configuration changed"}, "recovery state"},
+	} {
+		if next := nextStep(Report{Cluster: "lab", Readiness: test.readiness}); !strings.Contains(next, test.want) {
+			t.Fatalf("next %q does not contain %q", next, test.want)
+		}
 	}
 }
 

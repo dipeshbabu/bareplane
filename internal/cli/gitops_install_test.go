@@ -20,6 +20,15 @@ func TestGitOpsInstallRequiresClosedApprovalContract(t *testing.T) {
 	}
 }
 
+func TestGitOpsHandoffRequiresClosedApprovalContract(t *testing.T) {
+	for _, args := range [][]string{nil, {"--approve"}, {"--check"}, {"--force", "PRIVATE-SENTINEL"}, {"--approve", "lab", "a", "b"}} {
+		var stdout, stderr bytes.Buffer
+		if code := runGitOpsHandoff(args, &stdout, &stderr); code != 2 || strings.Contains(stderr.String(), "PRIVATE-SENTINEL") || !strings.Contains(stderr.String(), "gitops handoff") {
+			t.Fatalf("bad handoff argument handling: %d %s", code, stderr.String())
+		}
+	}
+}
+
 func TestGitOpsInstallRefusesApprovalMismatchAndUnfinishedBootstrap(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bareplane.yaml")
 	writeBootstrapRenderConfig(t, path)

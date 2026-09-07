@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/dipeshbabu/bareplane/internal/bootstrapapply"
 	"github.com/dipeshbabu/bareplane/internal/config"
 	"github.com/dipeshbabu/bareplane/internal/project"
 )
@@ -19,6 +20,8 @@ type Report struct {
 	PlanPresent        bool
 	ManifestPresent    bool
 	Operation          project.TerraformOperationStatus
+	BootstrapOperation project.TerraformOperationStatus
+	Readiness          bootstrapapply.Readiness
 	Next               string
 }
 
@@ -72,6 +75,14 @@ func Inspect(configPath string) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
+	report.BootstrapOperation, err = project.InspectBootstrapOperation(configPath)
+	if err != nil {
+		return Report{}, err
+	}
+	report.Readiness, err = bootstrapapply.RecordedReadiness(configPath)
+	if err != nil {
+		return Report{}, err
+	}
 	report.Next = nextStep(report)
 	return report, nil
 }
@@ -108,8 +119,26 @@ func inspectRegularFile(path string) (bool, error) {
 }
 
 func nextStep(report Report) string {
+	if report.BootstrapOperation.Present {
+		return fmt.Sprintf("wait for or inspect %s operation (pid %d)", report.BootstrapOperation.Operation, report.BootstrapOperation.PID)
+	}
 	if report.Operation.Present {
 		return fmt.Sprintf("wait for or inspect %s operation (pid %d)", report.Operation.Operation, report.Operation.PID)
+	}
+	if report.Readiness.Problem != "" {
+		return "inspect bootstrap/GitOps recovery state: " + report.Readiness.Problem
+	}
+	if report.Readiness.HandedOff {
+		return "Argo owns platform reconciliation; inspect current Argo sync and health"
+	}
+	if report.Readiness.ArgoReady {
+		return fmt.Sprintf("run bareplane gitops handoff --approve %s", report.Cluster)
+	}
+	if report.Readiness.KubernetesReady {
+		return fmt.Sprintf("render, review, and publish GitOps, then run bareplane gitops install --approve %s", report.Cluster)
+	}
+	if report.Readiness.BootstrapPresent {
+		return fmt.Sprintf("inspect bootstrap progress, then run bareplane bootstrap apply --approve %s", report.Cluster)
 	}
 	if !report.ProvisioningReady {
 		return "complete Proxmox provisioning settings, then run bareplane validate"

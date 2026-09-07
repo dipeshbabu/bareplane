@@ -11,13 +11,13 @@ permissions:
 
 jobs:
   join-topology:
-    name: "${{ matrix.mode == 'argocd' && 'Argo installation VM' || matrix.mode == 'recovery' && 'Bootstrap recovery VM' || matrix.mode == 'apply' && 'Bootstrap apply VMs' || 'Multi-node join VMs' }}"
+    name: "${{ matrix.mode == 'handoff' && 'GitOps handoff VM' || matrix.mode == 'argocd' && 'Argo installation VM' || matrix.mode == 'recovery' && 'Bootstrap recovery VM' || matrix.mode == 'apply' && 'Bootstrap apply VMs' || 'Multi-node join VMs' }}"
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        mode: [phases, apply, recovery, argocd]
+        mode: [phases, apply, recovery, argocd, handoff]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -45,6 +45,7 @@ jobs:
           BAREPLANE_TEST_BOOTSTRAP_APPLY: "${{ matrix.mode != 'phases' && '1' || '0' }}"
           BAREPLANE_TEST_BOOTSTRAP_RECOVERY: "${{ matrix.mode == 'recovery' && '1' || '0' }}"
           BAREPLANE_TEST_ARGOCD_INSTALL: "${{ matrix.mode == 'argocd' && '1' || '0' }}"
+          BAREPLANE_TEST_GITOPS_HANDOFF: "${{ matrix.mode == 'handoff' && '1' || '0' }}"
         run: python tests/ansible/join_topology_vm.py
 
   host-prepare:

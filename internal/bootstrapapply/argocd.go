@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,11 +24,13 @@ import (
 )
 
 type ArgoRequest struct {
-	Repository string
-	Revision   string
-	RootPath   string
-	PayloadDir string
-	Contract   string
+	Repository      string
+	Revision        string
+	RootPath        string
+	PayloadDir      string
+	Contract        string
+	Handoff         bool
+	HandoffContract string
 }
 
 func argoContract(cfg config.Config, files map[string][]byte) (string, map[string][]byte) {
@@ -50,31 +53,79 @@ func argoContract(cfg config.Config, files map[string][]byte) (string, map[strin
 	return hex.EncodeToString(hash.Sum(nil)), payload
 }
 
-func verifyArgoInput(directory string, payload map[string][]byte) error {
-	if err := project.RequireGeneratedDirectory(directory, "argocd-input"); err != nil {
+func handoffContract(cfg config.Config, files map[string][]byte, argo string) (string, map[string][]byte) {
+	payload := make(map[string][]byte)
+	names := make([]string, 0)
+	for name, data := range files {
+		if strings.HasPrefix(name, "components/") || strings.HasPrefix(name, cfg.Spec.GitOps.RootPath+"/") || name == "bootstrap/"+cfg.Metadata.Name+"-root-application.yaml" {
+			payload[name] = data
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	hash := sha256.New()
+	seed, _ := json.Marshal([]string{argo})
+	hash.Write(seed)
+	for _, name := range names {
+		fmt.Fprintf(hash, "%d:%s:%d:", len(name), name, len(payload[name]))
+		hash.Write(payload[name])
+	}
+	return hex.EncodeToString(hash.Sum(nil)), payload
+}
+
+func verifyGitOpsInput(directory, kind string, payload map[string][]byte) error {
+	if err := project.RequireGeneratedDirectory(directory, kind); err != nil {
 		return errors.New("private Argo input is not a managed directory")
 	}
-	entries, err := os.ReadDir(directory)
-	if err != nil || len(entries) != len(payload)+1 {
-		return errors.New("private Argo input file set changed")
+	directories := map[string]bool{".": true}
+	for name := range payload {
+		for parent := filepath.Dir(name); parent != "."; parent = filepath.Dir(parent) {
+			directories[filepath.ToSlash(parent)] = true
+		}
 	}
-	for _, entry := range entries {
+	seen := 0
+	err := filepath.WalkDir(directory, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		relative, err := filepath.Rel(directory, path)
+		if err != nil {
+			return err
+		}
+		relative = filepath.ToSlash(relative)
+		if entry.Type()&os.ModeSymlink != 0 {
+			return errors.New("private GitOps input is redirected")
+		}
+		if entry.IsDir() {
+			if !directories[relative] {
+				return errors.New("private GitOps input contains an unknown directory")
+			}
+			return nil
+		}
 		info, err := entry.Info()
 		if err != nil || !info.Mode().IsRegular() || entry.Type()&os.ModeSymlink != 0 || (runtime.GOOS != "windows" && info.Mode().Perm()&0o022 != 0) {
 			return errors.New("private Argo input must contain owned regular files")
 		}
-		if entry.Name() == project.GeneratedMarkerFilename {
-			continue
+		if relative == project.GeneratedMarkerFilename {
+			return nil
 		}
-		expected, ok := payload[entry.Name()]
+		expected, ok := payload[relative]
 		if !ok || info.Size() != int64(len(expected)) {
 			return errors.New("private Argo input changed")
 		}
 		digest := sha256.Sum256(expected)
-		actual, err := fileFingerprint(filepath.Join(directory, entry.Name()), int64(len(expected)))
+		actual, err := fileFingerprint(path, int64(len(expected)))
 		if err != nil || actual != hex.EncodeToString(digest[:]) {
 			return errors.New("private Argo input content changed")
 		}
+		seen++
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if seen != len(payload) {
+		return errors.New("private GitOps input is incomplete")
 	}
 	return nil
 }
@@ -82,7 +133,15 @@ func verifyArgoInput(directory string, payload map[string][]byte) error {
 // InstallArgo does not bootstrap an unfinished cluster or advance its phase
 // prefix. The owned argocd playbook runs a fresh full health gate under the same
 // operation lock before it can install the reviewed minimal control plane.
-func InstallArgo(ctx context.Context, options Options) (returnErr error) {
+func InstallArgo(ctx context.Context, options Options) error {
+	return runGitOps(ctx, options, false)
+}
+
+func HandoffGitOps(ctx context.Context, options Options) error {
+	return runGitOps(ctx, options, true)
+}
+
+func runGitOps(ctx context.Context, options Options, handoff bool) (returnErr error) {
 	if ctx == nil || options.Check || options.RecoverCredentials {
 		return errors.New("Argo installation requires a real operation context; check mode and credential recovery are unsupported")
 	}
@@ -105,6 +164,14 @@ func InstallArgo(ctx context.Context, options Options) (returnErr error) {
 		return err
 	}
 	contract, payload := argoContract(cfg, files)
+	phase, operation, kind := "argocd", "argocd-install", "argocd-input"
+	started, completed := "installing", "argocd-ready"
+	fullContract := ""
+	if handoff {
+		phase, operation, kind = "handoff", "gitops-handoff", "handoff-input"
+		started, completed = "handing-off", "gitops-handed-off"
+		fullContract, payload = handoffContract(cfg, files, contract)
+	}
 	realRunner := options.Runner == nil
 	if realRunner && runtime.GOOS != "linux" {
 		return errors.New("Argo installation must run on the original Linux/WSL bootstrap controller")
@@ -134,7 +201,7 @@ func InstallArgo(ctx context.Context, options Options) (returnErr error) {
 		}
 		options.Runner = commandRunner(binary)
 	}
-	lock, err := project.AcquireBootstrapOperation(path, "argocd-install")
+	lock, err := project.AcquireBootstrapOperation(path, operation)
 	if err != nil {
 		return err
 	}
@@ -182,9 +249,9 @@ func InstallArgo(ctx context.Context, options Options) (returnErr error) {
 	if err != nil {
 		return err
 	}
-	request := Request{Phase: "argocd", BundleDir: bundle, StateDir: directory, PrivateKeyFile: key, KnownHostsFile: trustPath,
+	request := Request{Phase: phase, BundleDir: bundle, StateDir: directory, PrivateKeyFile: key, KnownHostsFile: trustPath,
 		Argo: &ArgoRequest{Repository: cfg.Spec.GitOps.RepoURL, Revision: cfg.Spec.GitOps.Revision, RootPath: cfg.Spec.GitOps.RootPath,
-			PayloadDir: filepath.Join(directory, "argocd-input"), Contract: contract}}
+			PayloadDir: filepath.Join(directory, kind), Contract: contract, Handoff: handoff, HandoffContract: fullContract}}
 	if realRunner {
 		if err := validateControllerTools(ctx, request, cfg.Spec.Kubernetes.Version, options.LookPath); err != nil {
 			return err
@@ -197,18 +264,28 @@ func InstallArgo(ctx context.Context, options Options) (returnErr error) {
 	if present && (record.Cluster != cfg.Metadata.Name || record.BootstrapContract != bootstrapContract || record.Trust != trust) {
 		return errors.New("existing GitOps installation belongs to different inputs; implicit adoption or upgrades are not supported")
 	}
+	if handoff && (!present || record.Stage == "installing" || record.Contract != contract) {
+		return errors.New("matching verified Argo readiness is required before root handoff")
+	}
+	if !handoff && present && (record.Stage == "handing-off" || record.Stage == "gitops-handed-off") {
+		return errors.New("root handoff already started; Argo installation cannot reclaim GitOps-owned state")
+	}
+	if handoff && record.HandoffContract != "" && record.HandoffContract != fullContract {
+		return errors.New("existing handoff intent binds a different payload; implicit replacement is refused")
+	}
 	if present && record.Contract != contract {
 		// A failed read-only prerequisite may be corrected before the module
 		// publishes any resource-creation intent. The module still requires all
 		// target resources to be absent; deleting a receipt cannot grant adoption.
 		_, receiptErr := os.Lstat(filepath.Join(directory, "argocd-ownership.json"))
-		if record.Stage != "installing" || !errors.Is(receiptErr, os.ErrNotExist) {
+		if handoff || record.Stage != "installing" || !errors.Is(receiptErr, os.ErrNotExist) {
 			return errors.New("existing Argo creation intent binds a different GitOps contract; implicit upgrades are refused")
 		}
 	}
 	if !present {
 		record = GitOpsProgress{Version: 1, Cluster: cfg.Metadata.Name, BootstrapContract: bootstrapContract, Trust: trust, Contract: contract, Stage: "installing"}
 	}
+	alreadyHandedOff := record.Stage == "gitops-handed-off"
 	verify := func() error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -228,6 +305,12 @@ func InstallArgo(ctx context.Context, options Options) (returnErr error) {
 		currentContract, _ := argoContract(current, currentFiles)
 		if currentContract != contract {
 			return errors.New("GitOps repository contract or payload changed during installation")
+		}
+		if handoff {
+			currentFullContract, _ := handoffContract(current, currentFiles, currentContract)
+			if currentFullContract != fullContract {
+				return errors.New("root handoff payload changed during execution")
+			}
 		}
 		if _, err := project.RequireGitOpsExport(path, cfg.Metadata.Name, currentFiles); err != nil {
 			return err
@@ -256,42 +339,52 @@ func InstallArgo(ctx context.Context, options Options) (returnErr error) {
 	if err := verify(); err != nil {
 		return err
 	}
-	if err := project.ReplaceGeneratedTree(request.Argo.PayloadDir, "argocd-input", payload); err != nil {
+	if err := project.ReplaceGeneratedTree(request.Argo.PayloadDir, kind, payload); err != nil {
 		return err
 	}
-	if err := verifyArgoInput(request.Argo.PayloadDir, payload); err != nil {
+	if err := verifyGitOpsInput(request.Argo.PayloadDir, kind, payload); err != nil {
 		return err
 	}
-	log, logPath, err := createPhaseLog(directory, "argocd")
+	log, logPath, err := createPhaseLog(directory, phase)
 	if err != nil {
 		return err
 	}
-	record.Stage, record.Log, record.Contract = "installing", filepath.Base(logPath), contract
+	record.Stage, record.Log, record.Contract = started, filepath.Base(logPath), contract
+	if handoff {
+		record.HandoffContract = fullContract
+	}
+	if alreadyHandedOff {
+		record.Stage = completed
+	}
 	if err := saveGitOpsProgress(path, record); err != nil {
 		log.Close()
 		return err
 	}
 	present = true
 	request.Log = log
-	options.Event(Event{"argocd", "CHECK", "fresh Kubernetes health, anonymous Git reachability, and minimal Argo ownership"})
+	options.Event(Event{phase, "CHECK", "fresh health, public Git contract, and owned GitOps prerequisites"})
 	phaseCtx, cancel := context.WithTimeout(ctx, PhaseTimeout)
 	err = options.Runner(phaseCtx, request)
 	contextErr := phaseCtx.Err()
 	cancel()
 	closeErr := log.Close()
 	if err != nil || contextErr != nil || closeErr != nil {
-		return fmt.Errorf("Argo installation failed or was interrupted; inspect %s privately; readiness was not recorded", logPath)
+		return fmt.Errorf("GitOps %s failed or was interrupted; inspect %s privately; no new readiness was recorded and existing reconciliation is not rolled back", phase, logPath)
 	}
 	if err := verify(); err != nil {
 		return err
 	}
-	if err := verifyArgoInput(request.Argo.PayloadDir, payload); err != nil {
+	if err := verifyGitOpsInput(request.Argo.PayloadDir, kind, payload); err != nil {
 		return err
 	}
-	record.Stage = "argocd-ready"
+	record.Stage = completed
 	if err := saveGitOpsProgress(path, record); err != nil {
 		return err
 	}
-	options.Event(Event{"argocd", "PASS", "minimal pinned Argo is ready; root Application handoff has not been performed"})
+	message := "minimal pinned Argo is ready; root Application handoff has not been performed"
+	if handoff {
+		message = "root and child reconciliation verified; Argo owns long-lived platform state"
+	}
+	options.Event(Event{phase, "PASS", message})
 	return nil
 }

@@ -24,8 +24,13 @@ func phaseArguments(request Request) ([]string, error) {
 	recovery := request.RecoveryID != ""
 	argo := request.Argo != nil
 	if argo {
-		valid = !recovery && request.Phase == "argocd" && validDigest(request.Argo.Contract) &&
-			request.Argo.PayloadDir == filepath.Join(request.StateDir, "argocd-input")
+		phase, kind := "argocd", "argocd-input"
+		if request.Argo.Handoff {
+			phase, kind = "handoff", "handoff-input"
+		}
+		valid = !recovery && request.Phase == phase && validDigest(request.Argo.Contract) &&
+			request.Argo.PayloadDir == filepath.Join(request.StateDir, kind) &&
+			(!request.Argo.Handoff || validDigest(request.Argo.HandoffContract))
 	}
 	if recovery {
 		valid = !argo && validResetID(request.RecoveryID) && (request.Phase == "reset_validate" || request.Phase == "reset_execute")
@@ -50,6 +55,7 @@ func phaseArguments(request Request) ([]string, error) {
 	}
 	if argo {
 		variables, _ := json.Marshal(map[string]any{"bareplane_argocd_approved": true,
+			"bareplane_handoff_approved": request.Argo.Handoff, "bareplane_handoff_contract": request.Argo.HandoffContract,
 			"bareplane_gitops_repo_url": request.Argo.Repository, "bareplane_gitops_revision": request.Argo.Revision,
 			"bareplane_gitops_root_path": request.Argo.RootPath, "bareplane_argocd_input": request.Argo.PayloadDir,
 			"bareplane_gitops_contract": request.Argo.Contract})
