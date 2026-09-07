@@ -52,6 +52,13 @@ spec:
     kubeVIPVersion: 1.2.3
     ciliumVersion: 1.20.1
     kubeProxyReplacement: true
+  gitops:
+    repoURL: https://github.com/example/homelab-gitops.git
+    revision: main
+    rootPath: clusters/homelab
+    identity:
+      owner: example
+      name: homelab-gitops
   features:
     observability: true
     gpu: true

@@ -1,5 +1,7 @@
 # Configuration
 
+The optional [`spec.gitops` contract](gitops.md) defines a public HTTPS repository, explicit revision, and safe repository-relative root path. It contains no credentials and does not itself mutate Kubernetes.
+
 Bareplane uses a single versioned `bareplane.yaml` file as the user-facing source of intent.
 
 ## Initialize
