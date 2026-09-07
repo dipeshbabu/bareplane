@@ -326,7 +326,7 @@ func sshArguments(request Request, timeoutSeconds int) []string {
 		"-o", "PermitLocalCommand=no",
 		"-o", "ControlMaster=no",
 		"-o", "LogLevel=ERROR",
-		"-i", strings.ReplaceAll(request.PrivateKeyFile, "%", "%%"),
+		"-o", "IdentityFile=" + strconv.Quote(strings.ReplaceAll(request.PrivateKeyFile, "%", "%%")),
 		"-p", strconv.Itoa(request.Port),
 		"-l", request.User,
 		request.Host,

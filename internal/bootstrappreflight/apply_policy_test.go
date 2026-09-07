@@ -35,7 +35,7 @@ func TestSSHPathsEscapeQuotesSpacesAndPercentTokens(t *testing.T) {
 	request := Request{KnownHostsFile: "/project 'quoted' %h/known_hosts", PrivateKeyFile: "/private key %h", User: "debian", Host: "192.0.2.11", Port: 22}
 	args := sshArguments(request, 5)
 	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, `UserKnownHostsFile="/project 'quoted' %%h/known_hosts"`) || !strings.Contains(joined, "-i /private key %%h") {
+	if !strings.Contains(joined, `UserKnownHostsFile="/project 'quoted' %%h/known_hosts"`) || !strings.Contains(joined, `IdentityFile="/private key %%h"`) {
 		t.Fatalf("SSH paths were not escaped: %#v", args)
 	}
 }
