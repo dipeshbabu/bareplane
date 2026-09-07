@@ -90,7 +90,7 @@ ansible-playbook --syntax-check site.yaml
 ansible-playbook validate.yaml
 ```
 
-The second command previews the contract entirely on the controller. `site.yaml` orders host preparation, package installation, API VIP, primary control plane, Cilium, joins, kubeconfig, and health. These Ansible phases are implemented, including the [full bootstrap health gate](bootstrap-health.md). Syntax validation and contract preview do not indicate a bootstrapped cluster. Guarded CLI orchestration and phase-aware resume remain issue #66; do not rerun the complete site over existing cluster state to bypass individual phase recovery boundaries.
+The second command previews the contract entirely on the controller. `site.yaml` orders host preparation, package installation, API VIP, primary control plane, Cilium, joins, kubeconfig, and health. These phases are implemented, including the [full bootstrap health gate](bootstrap-health.md). Use [guarded bootstrap apply](bootstrap-apply.md) for approval, current prerequisites, locking, and phase-aware resume. Syntax validation and contract preview do not indicate a bootstrapped cluster; rerunning the entire site over existing state is not a recovery workflow.
 
 ## Kubernetes packages
 
@@ -188,7 +188,9 @@ This is a local-only readiness check. It verifies:
 - on POSIX systems, the private key is not group- or world-readable;
 - `ssh` is installed;
 - `ssh-keyscan` is installed;
-- `ansible-playbook` is installed.
+- `ansible-playbook` is installed;
+- `kubectl` is installed;
+- `openssl` is installed.
 
 The command does not read or print private-key contents, contact any configured host, invoke SSH, run Ansible, call Proxmox, or mutate the project.
 
@@ -265,4 +267,4 @@ Future execution code must keep private-key contents out of logs, generated inve
 
 ## Current limitation
 
-Bareplane can validate bootstrap connectivity, render the workspace, persist approved host identities, and authenticate for remote checks. The owned Ansible phases can prepare and form Kubernetes, publish its private kubeconfig, and verify bootstrap health. Guarded end-to-end CLI orchestration and explicit recovery remain separate issues #66–#67.
+Bareplane can validate connectivity, persist approved host identities, and run guarded end-to-end bootstrap with private progress and a verified kubeconfig. Explicit destructive recovery remains issue #67; ordinary apply never performs an automatic reset.

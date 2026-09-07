@@ -21,6 +21,7 @@ const (
 
 var (
 	ErrTerraformOperationLocked = errors.New("another Bareplane Terraform operation holds the project lock")
+	ErrBootstrapOperationLocked = errors.New("another Bareplane bootstrap operation holds the project lock")
 	operationNamePattern        = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 )
 
@@ -35,6 +36,22 @@ type TerraformOperationLock struct {
 	path     string
 	token    string
 	released bool
+	kind     string
+}
+
+// BootstrapOperationLock shares the ownership-safe lock implementation, but
+// uses the private bootstrap state directory rather than Terraform state.
+type BootstrapOperationLock = TerraformOperationLock
+
+func AcquireBootstrapOperation(configPath, operation string) (*BootstrapOperationLock, error) {
+	if !operationNamePattern.MatchString(operation) {
+		return nil, errors.New("invalid bootstrap operation name")
+	}
+	state, err := ensureBootstrapState(configPath)
+	if err != nil {
+		return nil, err
+	}
+	return acquireOperation(state, operation, "bootstrap", ErrBootstrapOperationLocked)
 }
 
 func AcquireTerraformOperation(configPath, operation string) (*TerraformOperationLock, error) {
@@ -45,23 +62,31 @@ func AcquireTerraformOperation(configPath, operation string) (*TerraformOperatio
 	if err != nil {
 		return nil, err
 	}
+	return acquireOperation(workspace.StateDir, operation, "Terraform", ErrTerraformOperationLocked)
+}
 
+func acquireOperation(stateDir, operation, kind string, lockedError error) (*TerraformOperationLock, error) {
 	token, err := randomOperationToken()
 	if err != nil {
-		return nil, fmt.Errorf("create Terraform operation token: %w", err)
+		return nil, fmt.Errorf("create %s operation token: %w", kind, err)
 	}
-	lockPath := filepath.Join(workspace.StateDir, terraformOperationLockDir)
+	lockPath := filepath.Join(stateDir, terraformOperationLockDir)
 	if err := os.Mkdir(lockPath, 0o700); err != nil {
 		if errors.Is(err, os.ErrExist) {
-			return nil, describeExistingOperationLock(lockPath)
+			return nil, describeExistingOperationLock(lockPath, kind, lockedError)
 		}
-		return nil, fmt.Errorf("create Terraform operation lock: %w", err)
+		return nil, fmt.Errorf("create %s operation lock: %w", kind, err)
 	}
 
 	cleanup := true
+	metadataCreated := false
+	metadataPath := filepath.Join(lockPath, terraformOperationLockMetadata)
 	defer func() {
 		if cleanup {
-			_ = os.RemoveAll(lockPath)
+			if metadataCreated {
+				_ = os.Remove(metadataPath)
+			}
+			_ = os.Remove(lockPath)
 		}
 	}()
 
@@ -73,28 +98,28 @@ func AcquireTerraformOperation(configPath, operation string) (*TerraformOperatio
 	}
 	encoded, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
-		return nil, fmt.Errorf("encode Terraform operation lock metadata: %w", err)
+		return nil, fmt.Errorf("encode %s operation lock metadata: %w", kind, err)
 	}
 	encoded = append(encoded, '\n')
-	metadataPath := filepath.Join(lockPath, terraformOperationLockMetadata)
 	file, err := os.OpenFile(metadataPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
-		return nil, fmt.Errorf("create Terraform operation lock metadata: %w", err)
+		return nil, fmt.Errorf("create %s operation lock metadata: %w", kind, err)
 	}
+	metadataCreated = true
 	if _, err := file.Write(encoded); err != nil {
 		_ = file.Close()
-		return nil, fmt.Errorf("write Terraform operation lock metadata: %w", err)
+		return nil, fmt.Errorf("write %s operation lock metadata: %w", kind, err)
 	}
 	if err := file.Sync(); err != nil {
 		_ = file.Close()
-		return nil, fmt.Errorf("sync Terraform operation lock metadata: %w", err)
+		return nil, fmt.Errorf("sync %s operation lock metadata: %w", kind, err)
 	}
 	if err := file.Close(); err != nil {
-		return nil, fmt.Errorf("close Terraform operation lock metadata: %w", err)
+		return nil, fmt.Errorf("close %s operation lock metadata: %w", kind, err)
 	}
 
 	cleanup = false
-	return &TerraformOperationLock{path: lockPath, token: token}, nil
+	return &TerraformOperationLock{path: lockPath, token: token, kind: kind}, nil
 }
 
 func (l *TerraformOperationLock) Release() error {
@@ -103,36 +128,36 @@ func (l *TerraformOperationLock) Release() error {
 	}
 	metadata, err := readOperationLockMetadata(l.path)
 	if err != nil {
-		return fmt.Errorf("verify Terraform operation lock ownership: %w", err)
+		return fmt.Errorf("verify %s operation lock ownership: %w", l.kind, err)
 	}
 	if metadata.Token != l.token {
-		return errors.New("refusing to release Terraform operation lock owned by another operation")
+		return fmt.Errorf("refusing to release %s operation lock owned by another operation", l.kind)
 	}
 
 	metadataPath := filepath.Join(l.path, terraformOperationLockMetadata)
 	if err := os.Remove(metadataPath); err != nil {
-		return fmt.Errorf("remove Terraform operation lock metadata: %w", err)
+		return fmt.Errorf("remove %s operation lock metadata: %w", l.kind, err)
 	}
 	if err := os.Remove(l.path); err != nil {
-		return fmt.Errorf("remove Terraform operation lock: %w", err)
+		return fmt.Errorf("remove %s operation lock: %w", l.kind, err)
 	}
 	l.released = true
 	return nil
 }
 
-func describeExistingOperationLock(lockPath string) error {
+func describeExistingOperationLock(lockPath, kind string, lockedError error) error {
 	info, err := os.Lstat(lockPath)
 	if err != nil {
-		return fmt.Errorf("inspect existing Terraform operation lock: %w", err)
+		return fmt.Errorf("inspect existing %s operation lock: %w", kind, err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return fmt.Errorf("%w: lock path %s is not a regular directory", ErrTerraformOperationLocked, lockPath)
+		return fmt.Errorf("%w: lock path %s is not a regular directory", lockedError, lockPath)
 	}
 	metadata, metadataErr := readOperationLockMetadata(lockPath)
 	if metadataErr == nil {
-		return fmt.Errorf("%w: operation %q (pid %d) at %s; if that process is no longer running, remove the lock directory manually", ErrTerraformOperationLocked, metadata.Operation, metadata.PID, lockPath)
+		return fmt.Errorf("%w: operation %q (pid %d) at %s; if that process is no longer running, remove the lock directory manually", lockedError, metadata.Operation, metadata.PID, lockPath)
 	}
-	return fmt.Errorf("%w: %s exists but its metadata is unreadable; if no Bareplane operation is running, inspect and remove the lock directory manually", ErrTerraformOperationLocked, lockPath)
+	return fmt.Errorf("%w: %s exists but its metadata is unreadable; if no Bareplane operation is running, inspect and remove the lock directory manually", lockedError, lockPath)
 }
 
 func readOperationLockMetadata(lockPath string) (operationLockMetadata, error) {
@@ -142,10 +167,10 @@ func readOperationLockMetadata(lockPath string) (operationLockMetadata, error) {
 		return operationLockMetadata{}, err
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return operationLockMetadata{}, errors.New("Terraform operation lock metadata must be a regular file")
+		return operationLockMetadata{}, errors.New("operation lock metadata must be a regular file")
 	}
 	if info.Size() > maxOperationLockMetadataBytes {
-		return operationLockMetadata{}, fmt.Errorf("Terraform operation lock metadata exceeds %d bytes", maxOperationLockMetadataBytes)
+		return operationLockMetadata{}, fmt.Errorf("operation lock metadata exceeds %d bytes", maxOperationLockMetadataBytes)
 	}
 	file, err := os.Open(metadataPath)
 	if err != nil {
@@ -162,12 +187,12 @@ func readOperationLockMetadata(lockPath string) (operationLockMetadata, error) {
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		if err == nil {
-			return operationLockMetadata{}, errors.New("Terraform operation lock metadata contains multiple JSON values")
+			return operationLockMetadata{}, errors.New("operation lock metadata contains multiple JSON values")
 		}
 		return operationLockMetadata{}, err
 	}
 	if metadata.Version != 1 || !operationNamePattern.MatchString(metadata.Operation) || metadata.PID <= 0 || strings.TrimSpace(metadata.Token) == "" {
-		return operationLockMetadata{}, errors.New("Terraform operation lock metadata is invalid")
+		return operationLockMetadata{}, errors.New("operation lock metadata is invalid")
 	}
 	return metadata, nil
 }

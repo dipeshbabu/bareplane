@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/dipeshbabu/bareplane/internal/config"
+	"github.com/dipeshbabu/bareplane/internal/project"
 	"github.com/dipeshbabu/bareplane/internal/topology"
 )
 
@@ -100,6 +101,7 @@ type Plan struct {
 	unchanged       bool
 	contents        []byte
 	existingContent []byte
+	configPath      string
 }
 
 type hostKey struct {
@@ -224,6 +226,7 @@ func Prepare(ctx context.Context, options Options) (Plan, error) {
 		unchanged:       unchanged,
 		contents:        contents,
 		existingContent: existingContent,
+		configPath:      options.ConfigPath,
 	}, nil
 }
 
@@ -243,12 +246,23 @@ func (p Plan) RequiresRotation() bool {
 }
 
 // Commit persists the prepared keys only after exact approval and a state recheck.
-func (p Plan) Commit(approval string) error {
+func (p Plan) Commit(approval string) (returnErr error) {
 	if !p.unchanged && approval != p.Cluster {
 		return ErrApprovalRequired
 	}
 	if p.RequiresRotation() && !p.allowRotation {
 		return ErrRotationRequired
+	}
+	if !p.unchanged {
+		lock, err := project.AcquireBootstrapOperation(p.configPath, "trust")
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if err := lock.Release(); err != nil {
+				returnErr = errors.Join(returnErr, err)
+			}
+		}()
 	}
 
 	_, currentContent, currentExists, err := loadManagedKnownHosts(p.KnownHostsPath)
@@ -346,7 +360,6 @@ func commandScanner(binary string) ScanFunc {
 
 func keyscanArguments(host string, port, timeoutSeconds int) []string {
 	return []string{
-		"-q",
 		"-T", strconv.Itoa(timeoutSeconds),
 		"-p", strconv.Itoa(port),
 		"-t", "ecdsa,ed25519,ecdsa-sk,ed25519-sk,rsa",

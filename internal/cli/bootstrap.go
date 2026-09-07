@@ -24,6 +24,7 @@ const bootstrapUsage = `Usage:
   bareplane bootstrap check [path]
   bareplane bootstrap trust [--rotate] [path]
   bareplane bootstrap preflight [path]
+  bareplane bootstrap apply --approve <cluster-name> [path]
 
 Commands:
   render     Render the deterministic Ansible bootstrap bundle offline
@@ -31,6 +32,7 @@ Commands:
   check      Check remote TCP reachability and SSH service identification only
   trust      Review and explicitly trust remote SSH host identities
   preflight  Authenticate and verify read-only remote host readiness
+  apply      Run owned bootstrap phases with approval, locking, and safe resume
 `
 
 func runBootstrap(args []string, stdout, stderr io.Writer) int {
@@ -52,6 +54,8 @@ func runBootstrap(args []string, stdout, stderr io.Writer) int {
 		return runBootstrapTrust(args[1:], os.Stdin, stdout, stderr)
 	case "preflight":
 		return runBootstrapPreflight(args[1:], stdout, stderr)
+	case "apply":
+		return runBootstrapApply(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown bootstrap command %q\n\n%s", args[0], bootstrapUsage)
 		return 2
@@ -131,7 +135,7 @@ func runBootstrapDoctor(
 	return 0
 }
 
-func runBootstrapRender(args []string, stdout, stderr io.Writer) int {
+func runBootstrapRender(args []string, stdout, stderr io.Writer) (code int) {
 	if len(args) > 1 {
 		fmt.Fprintln(stderr, "usage: bareplane bootstrap render [path]")
 		return 2
@@ -162,6 +166,17 @@ func runBootstrapRender(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "bootstrap render %s: %v\n", configPath, err)
 		return 1
 	}
+	lock, err := project.AcquireBootstrapOperation(configPath, "render")
+	if err != nil {
+		fmt.Fprintf(stderr, "bootstrap render %s: %v\n", configPath, err)
+		return 1
+	}
+	defer func() {
+		if err := lock.Release(); err != nil {
+			fmt.Fprintf(stderr, "bootstrap render: release operation lock: %v\n", err)
+			code = 1
+		}
+	}()
 	destination := filepath.Join(filepath.Dir(filepath.Clean(configPath)), ".bareplane", "bootstrap")
 	if err := project.ReplaceGeneratedTree(destination, "bootstrap", files); err != nil {
 		if errors.Is(err, project.ErrUnmanagedDestination) {

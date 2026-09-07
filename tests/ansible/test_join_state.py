@@ -1,5 +1,6 @@
 """Offline regression tests for join topology, ownership, and resume boundaries."""
 import copy
+import base64
 import hashlib
 import importlib.util
 from pathlib import Path
@@ -36,6 +37,32 @@ class JoinStateTests(unittest.TestCase):
     def test_single_primary_has_no_joins(self):
         desired = ['lab-control-1']
         self.assertEqual([name for name in sorted(desired) if name != desired[0]], [])
+
+    def test_stale_primary_markers_cannot_adopt_a_different_ca(self):
+        files = {'/etc/kubernetes/.bareplane-init-complete': b'lab\n', join.STATE + '/cilium-complete': b'complete', join.CA: self.ca}
+        for record in [None, b'foreign\n']:
+            files[join.STATE + '/init-ca-sha256'] = record
+            with patch.object(join, 'read_file', side_effect=files.get), self.assertRaisesRegex(ValueError, 'Primary CA differs'):
+                join.inspect_primary('lab')
+
+    def test_primary_admin_config_must_select_the_owned_ca_and_vip(self):
+        doc = dict(clusters=[dict(name='lab', cluster={'server': 'https://192.0.2.100:6443',
+                   'certificate-authority-data': base64.b64encode(self.ca).decode()})],
+                   users=[dict(name='admin', user={'client-certificate-data': 'private', 'client-key-data': 'private'})],
+                   contexts=[dict(name='admin@lab', context=dict(cluster='lab', user='admin'))], **{'current-context': 'admin@lab'})
+        join.validate_admin(doc, 'lab', self.identity['ca_sha256'], '192.0.2.100')
+        for change in ['ca', 'endpoint', 'exec', 'context']:
+            bad = copy.deepcopy(doc)
+            if change == 'ca':
+                bad['clusters'][0]['cluster']['certificate-authority-data'] = base64.b64encode(b'foreign').decode()
+            elif change == 'endpoint':
+                bad['clusters'][0]['cluster']['server'] = 'https://192.0.2.101:6443'
+            elif change == 'exec':
+                bad['users'][0]['user']['exec'] = dict(command='unmanaged')
+            else:
+                bad['current-context'] = 'other'
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                join.validate_admin(bad, 'lab', self.identity['ca_sha256'], '192.0.2.100')
 
     def test_three_control_planes_and_mixed_workers_partial_rerun(self):
         controls = ['lab-control-1', 'lab-control-2', 'lab-control-3']

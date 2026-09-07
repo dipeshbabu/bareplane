@@ -3,6 +3,7 @@
   bareplane_join_state:
     operation: primary
     cluster: "{{ bareplane_cluster }}"
+    vip: "{{ bareplane_api_vip }}"
   register: bareplane_join_primary
 
 - name: Require the primary API to be healthy

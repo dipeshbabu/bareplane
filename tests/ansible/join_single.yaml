@@ -8,6 +8,7 @@
     bareplane_control_planes: [localhost]
     bareplane_workers: []
     bareplane_kubernetes_version: '1.36.4'
+    bareplane_api_vip: 192.0.2.100
   pre_tasks:
     - name: Require disposable VM context
       ansible.builtin.assert:

@@ -9,9 +9,9 @@ ansible.cfg. Use ansible-playbook --syntax-check site.yaml to check all imports,
 or ansible-playbook validate.yaml for a controller-only contract preview.
 These checks need neither a private key nor a reachable host.
 
-No private-key path is embedded. Future guarded execution must supply the
-configured key through --private-key after verifying the project trust file,
-set ANSIBLE_CONFIG explicitly, and control environment/extra-variable overrides.
+No private-key path is embedded. Guarded bootstrap apply supplies the configured
+key after verifying project trust, sets ANSIBLE_CONFIG explicitly, and controls
+the environment/plugin paths. It refuses edited or stale generated assets.
 Ansible controller execution targets Linux/WSL, with OpenSSH installed.
 
 site.yaml defines the phase order. host_prepare installs pinned containerd and
@@ -26,6 +26,6 @@ formation and stores it under ../state/bootstrap/admin.conf, never ~/.kube/confi
 Health verifies API, node/etcd topology, VIP, Cilium, DNS, and pod/service traffic
 using the private controller kubeconfig and cleaned-up ephemeral test resources.
 The full health gate deliberately refuses check mode.
-Guarded end-to-end CLI orchestration is still a separate phase. Do not interpret
-a successful syntax check or contract preview as a successful bootstrap operation.
+Use bootstrap apply for approved phase execution and private progress/resume.
+Do not interpret a syntax check or contract preview as successful bootstrap.
 Only ansible.builtin is used; no external collections are required.

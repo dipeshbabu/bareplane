@@ -22,8 +22,8 @@ func TestInspectReadyProjectPassesAllChecks(t *testing.T) {
 	if report.HasFailures() {
 		t.Fatalf("unexpected failures: %#v", report.Results)
 	}
-	if len(report.Results) != 6 {
-		t.Fatalf("expected 6 checks, got %d", len(report.Results))
+	if len(report.Results) != 8 {
+		t.Fatalf("expected 8 checks, got %d", len(report.Results))
 	}
 }
 
@@ -38,7 +38,7 @@ func TestInspectMissingInventoryFails(t *testing.T) {
 }
 
 func TestInspectMissingToolFails(t *testing.T) {
-	for _, missing := range []string{"ssh", "ssh-keyscan", "ansible-playbook"} {
+	for _, missing := range []string{"ssh", "ssh-keyscan", "ansible-playbook", "kubectl", "openssl"} {
 		t.Run(missing, func(t *testing.T) {
 			configPath, keyPath := setupReadyProject(t)
 			report := Inspect(Options{

@@ -11,9 +11,13 @@ permissions:
 
 jobs:
   join-topology:
-    name: Multi-node join VMs
+    name: "${{ matrix.mode == 'apply' && 'Bootstrap apply VMs' || 'Multi-node join VMs' }}"
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [phases, apply]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -38,6 +42,7 @@ jobs:
       - name: Join three control planes and a worker, refuse foreign state, and reapply
         env:
           BAREPLANE_DISPOSABLE_VM: '1'
+          BAREPLANE_TEST_BOOTSTRAP_APPLY: "${{ matrix.mode == 'apply' && '1' || '0' }}"
         run: python tests/ansible/join_topology_vm.py
 
   host-prepare:
@@ -108,7 +113,9 @@ jobs:
       - name: Validate generated Ansible bundle
         env:
           BAREPLANE_TEST_ANSIBLE: '1'
-        run: go test -count=1 -v ./internal/render/ansible -run TestBundleAnsibleIntegration
+        run: |
+          go test -count=1 -v ./internal/render/ansible -run TestBundleAnsibleIntegration
+          go test -count=1 -v ./internal/bootstrapapply -run 'TestControlled.*Integration'
 
       - name: Test VIP interface and conflict detection
         run: python -m unittest discover -s tests/ansible -p 'test_*.py'

@@ -332,7 +332,6 @@ func TestParseHostKeyAcceptsEverySupportedKeyType(t *testing.T) {
 func TestKeyscanArgumentsContainOnlyDiscoveryControls(t *testing.T) {
 	got := keyscanArguments("2001:db8::10", 2222, 5)
 	want := []string{
-		"-q",
 		"-T", "5",
 		"-p", "2222",
 		"-t", "ecdsa,ed25519,ecdsa-sk,ed25519-sk,rsa",

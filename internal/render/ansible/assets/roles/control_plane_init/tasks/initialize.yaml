@@ -81,6 +81,30 @@
 - name: Verify API readiness after the credential handoff
   ansible.builtin.import_tasks: ready.yaml
 
+- name: Read the initialized public CA fingerprint
+  ansible.builtin.stat:
+    path: /etc/kubernetes/pki/ca.crt
+    follow: false
+    checksum_algorithm: sha256
+  register: bareplane_initialized_ca
+  when: not ansible_check_mode
+
+- name: Require a regular initialized public CA
+  ansible.builtin.assert:
+    that: bareplane_initialized_ca.stat.isreg | default(false) and not bareplane_initialized_ca.stat.islnk | default(false)
+    quiet: true
+    fail_msg: The initialized cluster CA is missing or redirected.
+  when: not ansible_check_mode
+
+- name: Bind initialized ownership to the public cluster CA
+  ansible.builtin.copy:
+    content: "{{ bareplane_initialized_ca.stat.checksum }}\n"
+    dest: /var/lib/bareplane/bootstrap/init-ca-sha256
+    mode: '0600'
+    owner: root
+    group: root
+  when: not bareplane_init_done and not ansible_check_mode
+
 - name: Mark initialization complete only after readiness succeeds
   ansible.builtin.copy:
     content: "{{ bareplane_cluster }}\n"
