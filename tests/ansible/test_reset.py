@@ -50,6 +50,12 @@ class ResetTests(unittest.TestCase):
             self.assertFalse(reset.approved_image_reference('--unowned', allowed, []))
         command.assert_not_called()
 
+    def test_reviewed_cilium_digests_accept_canonical_references(self):
+        digest = reset.CILIUM_IMAGES['1.20.1'][0]
+        reference = 'quay.io/cilium/cilium@sha256:' + digest
+        self.assertTrue(reset.approved_image_reference(reference, {reference}, []))
+        self.assertFalse(reset.approved_image_reference('quay.io/cilium/cilium@sha256:' + 'a' * 64, {reference}, []))
+
     def test_direct_reset_requires_approval_before_any_inspection(self):
         with patch.object(reset, 'inspect') as inspect, self.assertRaisesRegex(ValueError, 'explicit approval'):
             reset.reset_node(dict(approved=False), helpers)

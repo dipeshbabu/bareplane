@@ -16,6 +16,13 @@ STATE = '/var/lib/bareplane/bootstrap'
 RECEIPT = STATE + '/reset-receipt.json'
 PROBE_DIGEST = 'sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0'
 PROBE_IMAGES = {'docker.io/library/busybox:1.37.0@' + PROBE_DIGEST, 'docker.io/library/busybox@' + PROBE_DIGEST}
+# Reviewed defaults from the checksum-pinned Cilium charts used by bootstrap.
+CILIUM_IMAGES = {
+    '1.20.0': ('383968cd5e8873f7976fa76aa6196045643558f4cc9518a207b9335cb24a0e93',
+               '80744a8cc7c91c2f9e6347629406844eb35d79b30a732c6d41c15b17232a74f3'),
+    '1.20.1': ('ae9ea21f7427fe24bc6ea7247eb552157a1b0a431744045d3f641545ca71d11b',
+               '6c3885fc7b629099fdbe2a5c87869c86feb825fa18fae299eac0f61918d16ecf'),
+}
 OWNED_STATE = ['init-intent', 'init-ca-sha256', 'kubeadm.yaml', 'init-output', 'join-intent', 'join-complete',
                'join.yaml', 'join-output', 'cilium-intent', 'cilium-complete', 'cilium-values.yaml']
 KUBE_FILES = {'admin.conf', 'super-admin.conf', 'kubelet.conf', 'bootstrap-kubelet.conf', 'controller-manager.conf',
@@ -114,11 +121,17 @@ def inspect(p, helpers):
                 ('kube-apiserver-', 'kube-controller-manager-', 'kube-scheduler-', 'etcd-', 'kube-vip-', 'cilium-', 'coredns-'))),
                 'Unmanaged CRI pod sandboxes block bootstrap reset')
     images = set(command(['kubeadm', 'config', 'images', 'list', '--kubernetes-version', 'v' + p['kubernetes_version']]).decode().splitlines())
-    prefixes = ['quay.io/cilium/cilium:v' + p['cilium_version'], 'quay.io/cilium/operator-generic:v' + p['cilium_version'],
-                'ghcr.io/kube-vip/kube-vip:v' + p['kube_vip_version']]
+    require(p['cilium_version'] in CILIUM_IMAGES, 'Reset requires a reviewed Cilium image pin')
+    for repository, digest in zip(['quay.io/cilium/cilium', 'quay.io/cilium/operator-generic'], CILIUM_IMAGES[p['cilium_version']]):
+        images.add(repository + '@sha256:' + digest)
+        images.add(repository + ':v' + p['cilium_version'] + '@sha256:' + digest)
+    prefixes = ['ghcr.io/kube-vip/kube-vip:v' + p['kube_vip_version']]
     checked_images = {}
     for container in json.loads(command(['crictl', 'ps', '-a', '-o', 'json'])).get('containers', []):
-        image = container.get('image', {}).get('image', '')
+        specification = container.get('image', {})
+        # kubelet preserves the requested pinned reference separately from the
+        # resolved config ID in current CRI ImageSpec messages.
+        image = specification.get('userSpecifiedImage') or specification.get('image', '')
         probe = container.get('podSandboxId') in probe_ids
         key = (image, probe)
         if key not in checked_images:
