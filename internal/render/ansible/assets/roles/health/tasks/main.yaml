@@ -1,5 +1,28 @@
 ---
-- name: Refuse the unavailable health phase
-  ansible.builtin.fail:
-    msg: "Bootstrap phase health is not implemented; see Bareplane issue #65."
-  tags: [always]
+- name: Verify bootstrap health through the private controller kubeconfig
+  bareplane_health:
+    kubeconfig: "{{ inventory_dir }}/../state/bootstrap/admin.conf"
+    cluster: "{{ bareplane_cluster }}"
+    vip: "{{ bareplane_api_vip }}"
+    version: "{{ bareplane_kubernetes_version }}"
+    control_planes: "{{ bareplane_control_planes }}"
+    workers: "{{ bareplane_workers }}"
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  register: bareplane_health_report
+  failed_when: false
+
+- name: Report deterministic non-secret health diagnostics
+  ansible.builtin.debug:
+    msg: "{{ item.status }} {{ item.name }}: {{ item.message }}"
+  loop: "{{ bareplane_health_report.results | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Refuse handoff unless every bootstrap health check succeeded
+  ansible.builtin.assert:
+    that: bareplane_health_report.healthy | default(false)
+    quiet: true
+    fail_msg: "{{ bareplane_health_report.msg | default('Bootstrap health gate failed; no GitOps handoff is allowed.') }}"

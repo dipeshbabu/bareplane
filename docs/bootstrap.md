@@ -90,7 +90,7 @@ ansible-playbook --syntax-check site.yaml
 ansible-playbook validate.yaml
 ```
 
-The second command previews the contract entirely on the controller. `site.yaml` orders host preparation, package installation, API VIP, primary control plane, Cilium, joins, kubeconfig, and health. Preparation through private kubeconfig retrieval is implemented; the full health gate remains issue #65. Syntax validation and contract preview do not indicate a bootstrapped cluster.
+The second command previews the contract entirely on the controller. `site.yaml` orders host preparation, package installation, API VIP, primary control plane, Cilium, joins, kubeconfig, and health. These Ansible phases are implemented, including the [full bootstrap health gate](bootstrap-health.md). Syntax validation and contract preview do not indicate a bootstrapped cluster. Guarded CLI orchestration and phase-aware resume remain issue #66; do not rerun the complete site over existing cluster state to bypass individual phase recovery boundaries.
 
 ## Kubernetes packages
 
@@ -265,4 +265,4 @@ Future execution code must keep private-key contents out of logs, generated inve
 
 ## Current limitation
 
-Bareplane can validate bootstrap connectivity, render the workspace, verify readiness, persist approved host identities, and authenticate for remote checks. The generated host-preparation playbook can configure Linux and containerd. Kubernetes initialization and guarded end-to-end CLI orchestration remain subsequent phases.
+Bareplane can validate bootstrap connectivity, render the workspace, persist approved host identities, and authenticate for remote checks. The owned Ansible phases can prepare and form Kubernetes, publish its private kubeconfig, and verify bootstrap health. Guarded end-to-end CLI orchestration and explicit recovery remain separate issues #66–#67.

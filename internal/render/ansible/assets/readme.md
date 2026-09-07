@@ -23,8 +23,9 @@ Join expands stacked-etcd control planes, then workers, with temporary credentia
 and configuration/CA-bound ownership checks; completed nodes are not rejoined.
 Kubeconfig retrieves a verified private admin credential only after topology
 formation and stores it under ../state/bootstrap/admin.conf, never ~/.kube/config.
-Other phase roles stop with a specific error until their issues
-are implemented (including in check mode).
+Health verifies API, node/etcd topology, VIP, Cilium, DNS, and pod/service traffic
+using the private controller kubeconfig and cleaned-up ephemeral test resources.
+The full health gate deliberately refuses check mode.
 Guarded end-to-end CLI orchestration is still a separate phase. Do not interpret
 a successful syntax check or contract preview as a successful bootstrap operation.
 Only ansible.builtin is used; no external collections are required.

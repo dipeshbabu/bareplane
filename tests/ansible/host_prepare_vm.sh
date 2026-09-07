@@ -81,3 +81,4 @@ if ! ansible-playbook -i "$workspace/.bareplane/bootstrap/local.ini" tests/ansib
 fi
 cat "$workspace/kubeconfig-rerun.log"
 grep -Eq 'changed=0 .*unreachable=0 .*failed=0' "$workspace/kubeconfig-rerun.log"
+ansible-playbook -i "$workspace/.bareplane/bootstrap/local.ini" tests/ansible/health_single.yaml

@@ -194,6 +194,7 @@ def main():
         play('kubeconfig.yaml')
         if exported.stat().st_mtime_ns != before:
             raise RuntimeError('An unchanged kubeconfig was rewritten')
+        play('health.yaml')
         print('Three stacked-etcd control planes and one worker: joined, Ready, credentials cleaned, unchanged rerun.', flush=True)
     finally:
         for guest in guests:
