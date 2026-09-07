@@ -23,6 +23,20 @@ helpers = load('join_helpers', root / 'module_utils/bareplane_join_state.py')
 
 
 class ResetTests(unittest.TestCase):
+    def test_containerd_config_ids_resolve_only_to_pinned_image_aliases(self):
+        image = 'sha256:' + 'a' * 64
+        allowed = {'registry.k8s.io/kube-apiserver:v1.36.4'}
+        status = dict(status=dict(id=image, repoTags=list(allowed)))
+        with patch.object(reset, 'command', return_value=json.dumps(status).encode()) as command:
+            self.assertTrue(reset.approved_image_reference(image, allowed, []))
+        self.assertEqual(command.call_args.args[0], ['crictl', 'inspecti', image])
+        status['status']['repoTags'] = ['registry.k8s.io/kube-apiserver:v1.35.0']
+        with patch.object(reset, 'command', return_value=json.dumps(status).encode()):
+            self.assertFalse(reset.approved_image_reference(image, allowed, []))
+        with patch.object(reset, 'command') as command:
+            self.assertFalse(reset.approved_image_reference('--unowned', allowed, []))
+        command.assert_not_called()
+
     def test_direct_reset_requires_approval_before_any_inspection(self):
         with patch.object(reset, 'inspect') as inspect, self.assertRaisesRegex(ValueError, 'explicit approval'):
             reset.reset_node(dict(approved=False), helpers)

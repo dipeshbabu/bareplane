@@ -34,6 +34,19 @@ def command(args):
     return result.stdout
 
 
+def approved_image_reference(image, images, prefixes):
+    if image in images or any(image == prefix or re.fullmatch(re.escape(prefix) + r'@sha256:[a-f0-9]{64}', image) for prefix in prefixes):
+        return True
+    # containerd ListContainers reports image config IDs, not display tags.
+    # Resolve that immutable ID through CRI and require a pinned named alias.
+    if re.fullmatch(r'sha256:[a-f0-9]{64}', image) is None:
+        return False
+    status = json.loads(command(['crictl', 'inspecti', image]))['status']
+    if status.get('id') != image:
+        return False
+    return any(alias in images or alias in prefixes for alias in status.get('repoTags', []))
+
+
 def snapshot(path, helpers):
     data = helpers.read_file(path)
     if data is None:
@@ -90,10 +103,12 @@ def inspect(p, helpers):
     images = set(command(['kubeadm', 'config', 'images', 'list', '--kubernetes-version', 'v' + p['kubernetes_version']]).decode().splitlines())
     prefixes = ['quay.io/cilium/cilium:v' + p['cilium_version'], 'quay.io/cilium/operator-generic:v' + p['cilium_version'],
                 'ghcr.io/kube-vip/kube-vip:v' + p['kube_vip_version']]
+    checked_images = {}
     for container in json.loads(command(['crictl', 'ps', '-a', '-o', 'json'])).get('containers', []):
         image = container.get('image', {}).get('image', '')
-        require(image in images or any(image == prefix or image.startswith(prefix + '@sha256:') for prefix in prefixes),
-                'Unrecognized container images block bootstrap reset')
+        if image not in checked_images:
+            checked_images[image] = approved_image_reference(image, images, prefixes)
+        require(checked_images[image], 'Unrecognized container images block bootstrap reset')
     for path in ['/etc/kubernetes', '/etc/kubernetes/manifests', '/etc/kubernetes/pki', '/var/lib/kubelet',
                  '/var/lib/etcd', '/etc/cni/net.d', '/var/lib/bareplane', STATE]:
         helpers.checked_path(path, directory=True)
