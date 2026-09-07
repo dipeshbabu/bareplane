@@ -11,13 +11,13 @@ permissions:
 
 jobs:
   join-topology:
-    name: "${{ matrix.mode == 'recovery' && 'Bootstrap recovery VM' || matrix.mode == 'apply' && 'Bootstrap apply VMs' || 'Multi-node join VMs' }}"
+    name: "${{ matrix.mode == 'argocd' && 'Argo installation VM' || matrix.mode == 'recovery' && 'Bootstrap recovery VM' || matrix.mode == 'apply' && 'Bootstrap apply VMs' || 'Multi-node join VMs' }}"
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        mode: [phases, apply, recovery]
+        mode: [phases, apply, recovery, argocd]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -44,6 +44,7 @@ jobs:
           BAREPLANE_DISPOSABLE_VM: '1'
           BAREPLANE_TEST_BOOTSTRAP_APPLY: "${{ matrix.mode != 'phases' && '1' || '0' }}"
           BAREPLANE_TEST_BOOTSTRAP_RECOVERY: "${{ matrix.mode == 'recovery' && '1' || '0' }}"
+          BAREPLANE_TEST_ARGOCD_INSTALL: "${{ matrix.mode == 'argocd' && '1' || '0' }}"
         run: python tests/ansible/join_topology_vm.py
 
   host-prepare:
@@ -119,6 +120,8 @@ jobs:
           go test -count=1 -v ./internal/bootstrapapply -run 'TestControlled.*Integration'
 
       - name: Test VIP interface and conflict detection
+        env:
+          BAREPLANE_TEST_PUBLIC_GIT: '1'
         run: python -m unittest discover -s tests/ansible -p 'test_*.py'
 
       - name: Validate deterministic GitOps export and Kubernetes/Argo schemas

@@ -97,8 +97,13 @@ func TestRenderApplicationsUseOnlyUserRepositoryAndSeparateRoot(t *testing.T) {
 				Finalizers  []string
 			}
 			Spec struct {
-				Project string
-				Source  struct {
+				Project           string
+				IgnoreDifferences []struct {
+					Group        string
+					Kind         string
+					JSONPointers []string `yaml:"jsonPointers"`
+				} `yaml:"ignoreDifferences"`
+				Source struct {
 					RepoURL        string `yaml:"repoURL"`
 					TargetRevision string `yaml:"targetRevision"`
 					Path           string
@@ -128,6 +133,14 @@ func TestRenderApplicationsUseOnlyUserRepositoryAndSeparateRoot(t *testing.T) {
 		}
 		if app.Kind != "Application" || app.APIVersion != "argoproj.io/v1alpha1" || app.Metadata.Namespace != "argocd" || len(app.Metadata.Finalizers) != 0 || app.Spec.Project != "default" || app.Spec.Source.RepoURL != cfg.Spec.GitOps.RepoURL || app.Spec.Source.TargetRevision != cfg.Spec.GitOps.Revision || app.Spec.Source.Path != sourcePath || app.Spec.Destination.Server != "https://kubernetes.default.svc" || app.Spec.Destination.Namespace != "argocd" || app.Spec.SyncPolicy.Automated.Prune || app.Spec.SyncPolicy.Automated.SelfHeal || app.Spec.SyncPolicy.Automated.AllowEmpty {
 			t.Fatalf("Application violated handoff contract: %s", filename)
+		}
+		ignored := app.Spec.IgnoreDifferences
+		if sourcePath == "components/argocd" {
+			if len(ignored) != 1 || ignored[0].Group != "*" || ignored[0].Kind != "*" || !reflect.DeepEqual(ignored[0].JSONPointers, []string{"/metadata/annotations/bareplane.io~1installation"}) {
+				t.Fatal("Argo must ignore only its bootstrap provenance annotation")
+			}
+		} else if len(ignored) != 0 {
+			t.Fatal("root Application must not ignore child desired state")
 		}
 	}
 	if _, exists := files[path.Join(cfg.Spec.GitOps.RootPath, "root-application.yaml")]; exists {

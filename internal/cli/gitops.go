@@ -14,16 +14,22 @@ import (
 
 const gitOpsUsage = `Usage:
   bareplane gitops render [path]
+  bareplane gitops install --approve <cluster-name> [path]
 
 Render a public, reviewable GitOps export beside bareplane.yaml in gitops/.
 No Kubernetes access, Git commit, or push occurs. Copy the reviewed payload to
 your own repository before handoff; edited or unmanaged exports are preserved.
+Install verifies fresh bootstrap health and public Git prerequisites, then creates
+only the minimal pinned Argo control plane; root handoff remains separate.
 `
 
 func runGitOps(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "help" || args[0] == "--help" || args[0] == "-h")) {
 		fmt.Fprint(stdout, gitOpsUsage)
 		return 0
+	}
+	if strings.ToLower(args[0]) == "install" {
+		return runGitOpsInstall(args[1:], stdout, stderr)
 	}
 	if strings.ToLower(args[0]) != "render" || len(args) > 2 || (len(args) == 2 && strings.HasPrefix(args[1], "-")) {
 		fmt.Fprint(stderr, gitOpsUsage)

@@ -168,3 +168,31 @@ func TestGitOpsExportSharesBootstrapOperationLock(t *testing.T) {
 		t.Fatalf("write bypassed active operation: %v", err)
 	}
 }
+
+func TestRequireGitOpsExportRejectsMissingStaleOrEditedPayload(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "bareplane.yaml")
+	files := map[string][]byte{"safe.yaml": []byte("safe")}
+	if _, err := RequireGitOpsExport(configPath, "lab", files); err == nil {
+		t.Fatal("missing export accepted")
+	}
+	destination, err := WriteGitOpsExport(configPath, "lab", files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RequireGitOpsExport(configPath, "lab", files); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []map[string][]byte{
+		{"safe.yaml": []byte("new")},
+		{"different.yaml": []byte("safe")},
+		{"safe.yaml": []byte("safe"), "extra.yaml": []byte("extra")},
+	} {
+		if _, err := RequireGitOpsExport(configPath, "lab", expected); err == nil {
+			t.Fatal("stale export accepted")
+		}
+	}
+	exportWrite(t, filepath.Join(destination, "safe.yaml"), []byte("user edit"))
+	if _, err := RequireGitOpsExport(configPath, "lab", files); err == nil {
+		t.Fatal("modified export accepted")
+	}
+}
