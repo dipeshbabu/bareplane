@@ -233,8 +233,13 @@ def guard_api(p, helpers):
         require(not json.loads(command(base + ['get', resource, '-A', '-o', 'json']))['items'], 'Persistent application storage blocks bootstrap reset')
     namespaces = json.loads(command(base + ['get', 'namespaces', '-o', 'json']))['items']
     for namespace in namespaces:
-        require(namespace['metadata']['name'] in ['default', 'kube-system', 'kube-public', 'kube-node-lease'],
-                'Application or leftover verification namespaces block bootstrap reset')
+        metadata = namespace['metadata']
+        annotations = metadata.get('annotations', {})
+        owned_cilium = (metadata['name'] == 'cilium-secrets' and annotations.get('meta.helm.sh/release-name') == 'bareplane-cilium'
+                        and annotations.get('meta.helm.sh/release-namespace') == 'kube-system'
+                        and metadata.get('labels', {}).get('app.kubernetes.io/managed-by') == 'Helm')
+        require(metadata['name'] in ['default', 'kube-system', 'kube-public', 'kube-node-lease'] or owned_cilium,
+                'Application or leftover verification namespace blocks bootstrap reset: ' + metadata['name'])
     bootstrap_pods_only(json.loads(command(base + ['get', 'pods', '-A', '-o', 'json']))['items'], p['nodes'])
     for deployment in json.loads(command(base + ['get', 'deployments', '-A', '-o', 'json']))['items']:
         require(deployment['metadata'].get('namespace') == 'kube-system' and deployment['metadata']['name'] in ['coredns', 'cilium-operator'],
