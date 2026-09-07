@@ -35,7 +35,10 @@ def command(args):
 
 
 def approved_image_reference(image, images, prefixes):
-    if image in images or any(image == prefix or re.fullmatch(re.escape(prefix) + r'@sha256:[a-f0-9]{64}', image) for prefix in prefixes):
+    def named(reference):
+        return reference in images or any(reference == prefix or re.fullmatch(re.escape(prefix) + r'@sha256:[a-f0-9]{64}', reference) for prefix in prefixes)
+
+    if named(image):
         return True
     # containerd ListContainers reports image config IDs, not display tags.
     # Resolve that immutable ID through CRI and require a pinned named alias.
@@ -44,7 +47,7 @@ def approved_image_reference(image, images, prefixes):
     status = json.loads(command(['crictl', 'inspecti', image]))['status']
     if status.get('id') != image:
         return False
-    return any(alias in images or alias in prefixes for alias in status.get('repoTags', []))
+    return any(named(alias) for alias in status.get('repoTags', []) + status.get('repoDigests', []))
 
 
 def snapshot(path, helpers):

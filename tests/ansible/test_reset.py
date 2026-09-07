@@ -33,6 +33,10 @@ class ResetTests(unittest.TestCase):
         status['status']['repoTags'] = ['registry.k8s.io/kube-apiserver:v1.35.0']
         with patch.object(reset, 'command', return_value=json.dumps(status).encode()):
             self.assertFalse(reset.approved_image_reference(image, allowed, []))
+        status['status']['repoTags'] = []
+        status['status']['repoDigests'] = ['quay.io/cilium/cilium:v1.20.1@sha256:' + 'b' * 64]
+        with patch.object(reset, 'command', return_value=json.dumps(status).encode()):
+            self.assertTrue(reset.approved_image_reference(image, allowed, ['quay.io/cilium/cilium:v1.20.1']))
         with patch.object(reset, 'command') as command:
             self.assertFalse(reset.approved_image_reference('--unowned', allowed, []))
         command.assert_not_called()
