@@ -23,6 +23,11 @@ helpers = load('join_helpers', root / 'module_utils/bareplane_join_state.py')
 
 
 class ResetTests(unittest.TestCase):
+    def test_pinned_kubelet_managed_state_roots_are_explicit(self):
+        self.assertIn('dra_manager_state', reset.KUBELET_FILES)
+        self.assertIn('image_manager', reset.KUBELET_FILES)
+        self.assertNotIn('application-data', reset.KUBELET_FILES)
+
     def test_only_identified_health_probe_sandboxes_are_owned(self):
         nonce = 'a' * 16
         sandbox = dict(id='fixture', metadata=dict(name='server', namespace='bareplane-health-' + nonce),

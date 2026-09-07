@@ -29,7 +29,7 @@ KUBE_FILES = {'admin.conf', 'super-admin.conf', 'kubelet.conf', 'bootstrap-kubel
               'scheduler.conf', '.bareplane-init-complete', 'manifests', 'pki'}
 KUBELET_FILES = {'.kubelet-keep', 'config.yaml', 'instance-config.yaml', 'kubeadm-flags.env', 'pki', 'pods', 'plugins',
                  'plugins_registry', 'device-plugins', 'pod-resources', 'cpu_manager_state', 'memory_manager_state',
-                 'checkpoints', 'allocated_pods_state', 'actuated_pods_state', 'dra_manager_state'}
+                 'checkpoints', 'allocated_pods_state', 'actuated_pods_state', 'dra_manager_state', 'image_manager'}
 
 
 def require(condition, message):
