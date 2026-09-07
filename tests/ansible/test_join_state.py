@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-source = Path(__file__).resolve().parents[2] / 'internal/render/ansible/assets/library/bareplane_join_state.py'
+source = Path(__file__).resolve().parents[2] / 'internal/render/ansible/assets/module_utils/bareplane_join_state.py'
 spec = importlib.util.spec_from_file_location('join_state', source)
 join = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(join)

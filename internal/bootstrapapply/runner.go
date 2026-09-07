@@ -21,8 +21,12 @@ const MaximumLogSize = 4 * 1024 * 1024
 
 func phaseArguments(request Request) ([]string, error) {
 	valid := false
+	recovery := request.RecoveryID != ""
+	if recovery {
+		valid = validResetID(request.RecoveryID) && (request.Phase == "reset_validate" || request.Phase == "reset_execute")
+	}
 	for _, phase := range phases {
-		if phase == request.Phase {
+		if !recovery && phase == request.Phase {
 			valid = true
 		}
 	}
@@ -33,7 +37,13 @@ func phaseArguments(request Request) ([]string, error) {
 	// Escape the inner OpenSSH configuration string, not a shell command.
 	identity := strconv.Quote(strings.ReplaceAll(request.PrivateKeyFile, "%", "%%"))
 	identity = identity[1 : len(identity)-1]
-	return []string{"--inventory", filepath.Join(request.BundleDir, "inventory.yaml"), "--private-key", identity, request.Phase + ".yaml"}, nil
+	args := []string{"--inventory", filepath.Join(request.BundleDir, "inventory.yaml"), "--private-key", identity}
+	if recovery {
+		variables, _ := json.Marshal(map[string]any{"bareplane_reset_id": request.RecoveryID, "bareplane_reset_scope": "cluster",
+			"bareplane_reset_approved": true, "bareplane_reset_allow_unavailable_api": request.AllowUnavailableAPI})
+		args = append(args, "--extra-vars", string(variables))
+	}
+	return append(args, request.Phase+".yaml"), nil
 }
 
 func controlledEnvironment(base []string, request Request) []string {

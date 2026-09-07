@@ -85,7 +85,7 @@ def endpoint(vip, port):
     return 'https://' + ('[' + str(address) + ']' if address.version == 6 else str(address)) + ':' + str(port)
 
 
-def validate(doc, cluster, ca_sha256):
+def validate(doc, cluster, ca_sha256, check_expiry=True):
     keys(doc, ['apiVersion', 'kind', 'preferences', 'clusters', 'users', 'contexts', 'current-context', 'extensions'],
          ['apiVersion', 'kind', 'clusters', 'users', 'contexts', 'current-context'])
     if doc['apiVersion'] != 'v1' or doc['kind'] != 'Config' or doc.get('preferences', {}) != {}:
@@ -121,16 +121,17 @@ def validate(doc, cluster, ca_sha256):
     ca = binary(entry['cluster']['certificate-authority-data'])
     if hashlib.sha256(ca).hexdigest() != ca_sha256:
         raise ValueError('Kubeconfig CA differs from the authenticated primary')
-    openssl(['x509', '-noout', '-checkend', '0'], ca)
+    openssl(['x509', '-noout'] + (['-checkend', '0'] if check_expiry else []), ca)
     certificate = binary(user['user']['client-certificate-data'])
     private_key = binary(user['user']['client-key-data'])
-    openssl(['x509', '-noout', '-checkend', '0'], certificate)
+    openssl(['x509', '-noout'] + (['-checkend', '0'] if check_expiry else []), certificate)
     # Only the public CA is staged temporarily. Client credentials stay in
     # memory; system trust stores must not validate an unrelated client issuer.
     with tempfile.NamedTemporaryFile(prefix='bareplane-public-ca-', mode='wb') as ca_file:
         ca_file.write(ca)
         ca_file.flush()
-        openssl(['verify', '-CAfile', ca_file.name, '-no-CApath', '-no-CAstore', '-purpose', 'sslclient'], certificate)
+        openssl(['verify', '-CAfile', ca_file.name, '-no-CApath', '-no-CAstore', '-purpose', 'sslclient']
+                + ([] if check_expiry else ['-no_check_time']), certificate)
     public_certificate = openssl(['x509', '-pubkey', '-noout'], certificate)
     public_key = openssl(['pkey', '-pubout', '-passin', 'pass:'], private_key)
     if public_certificate != public_key:
@@ -182,7 +183,7 @@ def check_destination(destination):
     return path
 
 
-def existing(path, cluster, ca_sha256, server):
+def existing(path, cluster, ca_sha256, server, check_expiry=True):
     if not inspect_path(path, private=True):
         return False
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -192,7 +193,7 @@ def existing(path, cluster, ca_sha256, server):
     if not separator or not header.startswith(HEADER) or len(body) > LIMIT or header[len(HEADER):] != hashlib.sha256(body).hexdigest().encode():
         raise ValueError('Existing kubeconfig is unmanaged, modified, or oversized')
     doc = decode(body)
-    validate(doc, cluster, ca_sha256)
+    validate(doc, cluster, ca_sha256, check_expiry=check_expiry)
     identity = [dict(name=EXTENSION, extension=dict(cluster=cluster, caSHA256=ca_sha256, server=server))]
     if doc.get('extensions') != identity or doc['clusters'][0]['cluster']['server'] != server:
         raise ValueError('Existing kubeconfig cluster identity or VIP differs; use explicit lifecycle recovery')
@@ -234,14 +235,22 @@ def publish(destination, source, cluster, ca_sha256, vip, port=6443, check=False
 def main():
     from ansible.module_utils.basic import AnsibleModule
     module = AnsibleModule(argument_spec=dict(
-        destination=dict(type='path', required=True), content=dict(type='str', required=True, no_log=True),
+        operation=dict(type='str', choices=['publish', 'inspect', 'withdraw'], default='publish'),
+        destination=dict(type='path', required=True), content=dict(type='str', no_log=True),
         cluster=dict(type='str', required=True), ca_sha256=dict(type='str', required=True),
         vip=dict(type='str', required=True), port=dict(type='int', default=6443),
     ), supports_check_mode=True)
     try:
         p = module.params
-        source = binary(p['content'])
-        changed = publish(p['destination'], source, p['cluster'], p['ca_sha256'], p['vip'], p['port'], module.check_mode)
+        if p['operation'] == 'publish':
+            source = binary(p['content'])
+            changed = publish(p['destination'], source, p['cluster'], p['ca_sha256'], p['vip'], p['port'], module.check_mode)
+        else:
+            path = check_destination(p['destination'])
+            present = existing(path, p['cluster'], p['ca_sha256'], endpoint(p['vip'], p['port']), check_expiry=False)
+            changed = present and p['operation'] == 'withdraw'
+            if changed and not module.check_mode:
+                os.unlink(path)
         module.exit_json(changed=changed)
     except ValueError as error:
         module.fail_json(msg=str(error))

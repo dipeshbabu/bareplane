@@ -29,12 +29,14 @@ var (
 func Phases() []string { return append([]string(nil), phases[:]...) }
 
 type Request struct {
-	Phase          string
-	BundleDir      string
-	StateDir       string
-	PrivateKeyFile string
-	KnownHostsFile string
-	Log            io.Writer
+	Phase               string
+	BundleDir           string
+	StateDir            string
+	PrivateKeyFile      string
+	KnownHostsFile      string
+	Log                 io.Writer
+	RecoveryID          string
+	AllowUnavailableAPI bool
 }
 
 type Runner func(context.Context, Request) error
@@ -42,16 +44,17 @@ type Preflight func(context.Context, bootstrappreflight.Options) doctor.Report
 type Event struct{ Phase, Status, Message string }
 
 type Options struct {
-	ConfigPath   string
-	Approval     string
-	Check        bool
-	Runner       Runner
-	Doctor       func(bootstrapdoctor.Options) doctor.Report
-	Preflight    Preflight
-	ResolveTrust func(string) (string, error)
-	LookPath     bootstrapdoctor.LookPathFunc
-	HomeDir      bootstrappreflight.UserHomeDirFunc
-	Event        func(Event)
+	ConfigPath         string
+	Approval           string
+	Check              bool
+	RecoverCredentials bool
+	Runner             Runner
+	Doctor             func(bootstrapdoctor.Options) doctor.Report
+	Preflight          Preflight
+	ResolveTrust       func(string) (string, error)
+	LookPath           bootstrapdoctor.LookPathFunc
+	HomeDir            bootstrappreflight.UserHomeDirFunc
+	Event              func(Event)
 }
 
 type PhaseError struct{ Phase, LogPath, Reason string }
@@ -144,6 +147,11 @@ func Apply(ctx context.Context, options Options) (returnErr error) {
 	if err != nil {
 		return err
 	}
+	if _, pending, err := ReadReset(path); err != nil {
+		return err
+	} else if pending {
+		return errors.New("an explicit reset is pending; run bootstrap diagnose and finish that reset before apply")
+	}
 	if exists && (state.Cluster != cfg.Metadata.Name || state.Contract != contract || state.Trust != trust) {
 		return errors.New("bootstrap progress belongs to different configuration or SSH identities; use explicit recovery, not implicit adoption")
 	}
@@ -155,6 +163,14 @@ func Apply(ctx context.Context, options Options) (returnErr error) {
 		return err
 	}
 	start := state.Completed
+	if options.RecoverCredentials {
+		if !exists || state.Completed < 6 {
+			return errors.New("kubeconfig recovery requires recorded complete node formation")
+		}
+		start = 6
+	} else if state.Active == "kubeconfig" && state.Completed >= 6 {
+		start = 6
+	}
 	if start == len(phases) {
 		start--
 	}

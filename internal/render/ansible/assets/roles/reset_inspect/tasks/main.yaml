@@ -1,0 +1,65 @@
+---
+- name: Require explicit full-cluster reset authority
+  ansible.builtin.assert:
+    that:
+      - bareplane_reset_approved | default(false) | bool
+      - bareplane_reset_scope | default('') == 'cluster'
+      - bareplane_reset_id | default('') is match('^[a-f0-9]{32}$')
+      - not ansible_check_mode
+    quiet: true
+    fail_msg: Full-cluster reset requires exact approval, destructive confirmation, and the owned reset workflow.
+
+- name: Read public reset identity on every machine
+  bareplane_reset:
+    operation: facts
+    reset_id: "{{ bareplane_reset_id }}"
+    cluster: "{{ bareplane_cluster }}"
+    name: "{{ inventory_hostname }}"
+    primary: "{{ bareplane_primary_control_plane }}"
+    vip: "{{ bareplane_api_vip }}"
+    kubernetes_version: "{{ bareplane_kubernetes_version }}"
+    cilium_version: "{{ bareplane_cilium_version }}"
+    kube_vip_version: "{{ bareplane_kube_vip_version }}"
+  register: bareplane_reset_facts
+
+- name: Discover the current authenticated node address
+  bareplane_vip_probe:
+    vip: "{{ bareplane_api_vip }}"
+    check_conflicts: false
+  register: bareplane_vip_facts
+
+- name: Reconstruct the reviewed node ownership identity
+  ansible.builtin.set_fact:
+    bareplane_reset_identity:
+      cluster: "{{ bareplane_cluster }}"
+      ca_sha256: "{{ hostvars[bareplane_primary_control_plane].bareplane_reset_facts.ca_sha256 }}"
+      name: "{{ inventory_hostname }}"
+      control_plane: "{{ inventory_hostname in groups['control_plane'] }}"
+      version: "{{ bareplane_kubernetes_version }}"
+      endpoint: "{{ bareplane_api_vip }}:{{ bareplane_api_port }}"
+      address: "{{ bareplane_vip_facts.node_address }}"
+
+- name: Build only the fixed non-secret reset parameters
+  ansible.builtin.set_fact:
+    bareplane_reset_parameters:
+      reset_id: "{{ bareplane_reset_id }}"
+      cluster: "{{ bareplane_cluster }}"
+      name: "{{ inventory_hostname }}"
+      primary: "{{ bareplane_primary_control_plane }}"
+      nodes: "{{ bareplane_control_planes + bareplane_workers }}"
+      vip: "{{ bareplane_api_vip }}"
+      kubernetes_version: "{{ bareplane_kubernetes_version }}"
+      cilium_version: "{{ bareplane_cilium_version }}"
+      kube_vip_version: "{{ bareplane_kube_vip_version }}"
+      ca_sha256: "{{ hostvars[bareplane_primary_control_plane].bareplane_reset_facts.ca_sha256 }}"
+      init_digest: "{{ lookup('ansible.builtin.template', role_path ~ '/../control_plane_init/templates/kubeadm.yaml.j2') | hash('sha256') }}"
+      join_digest: "{{ bareplane_reset_identity | to_json(sort_keys=True, separators=(',', ':')) | hash('sha256') }}"
+      vip_hashes:
+        - "{{ lookup('ansible.builtin.template', role_path ~ '/../api_vip/templates/kube-vip.yaml.j2', template_vars={'bareplane_vip_kubeconfig': 'admin.conf'}) | hash('sha256') }}"
+        - "{{ lookup('ansible.builtin.template', role_path ~ '/../api_vip/templates/kube-vip.yaml.j2', template_vars={'bareplane_vip_kubeconfig': 'super-admin.conf'}) | hash('sha256') }}"
+      allow_unavailable_api: "{{ bareplane_reset_allow_unavailable_api | default(false) | bool }}"
+      approved: true
+
+- name: Refuse unowned, modified, mounted, or application state on every node
+  bareplane_reset:
+  args: "{{ bareplane_reset_parameters | combine({'operation': 'inspect'}) }}"

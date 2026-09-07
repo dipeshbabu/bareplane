@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/dipeshbabu/bareplane/internal/bootstrapapply"
 	"github.com/dipeshbabu/bareplane/internal/bootstrapcheck"
 	"github.com/dipeshbabu/bareplane/internal/bootstrapdoctor"
 	"github.com/dipeshbabu/bareplane/internal/bootstrappreflight"
@@ -25,6 +26,9 @@ const bootstrapUsage = `Usage:
   bareplane bootstrap trust [--rotate] [path]
   bareplane bootstrap preflight [path]
   bareplane bootstrap apply --approve <cluster-name> [path]
+  bareplane bootstrap diagnose [path]
+  bareplane bootstrap reset --approve <cluster-name> --scope cluster --confirm-destructive [path]
+  bareplane bootstrap recover-kubeconfig --approve <cluster-name> [path]
 
 Commands:
   render     Render the deterministic Ansible bootstrap bundle offline
@@ -33,6 +37,9 @@ Commands:
   trust      Review and explicitly trust remote SSH host identities
   preflight  Authenticate and verify read-only remote host readiness
   apply      Run owned bootstrap phases with approval, locking, and safe resume
+  diagnose   Inspect local progress, operation locks, and remote ownership markers
+  reset      Explicitly reset and reboot a verified bootstrap-only cluster
+  recover-kubeconfig  Recover a lost project credential and verify health
 `
 
 func runBootstrap(args []string, stdout, stderr io.Writer) int {
@@ -56,6 +63,12 @@ func runBootstrap(args []string, stdout, stderr io.Writer) int {
 		return runBootstrapPreflight(args[1:], stdout, stderr)
 	case "apply":
 		return runBootstrapApply(args[1:], stdout, stderr)
+	case "diagnose":
+		return runBootstrapDiagnose(args[1:], stdout, stderr)
+	case "reset":
+		return runBootstrapReset(args[1:], stdout, stderr)
+	case "recover-kubeconfig":
+		return runBootstrapApply(args[1:], stdout, stderr, bootstrapapply.Options{RecoverCredentials: true})
 	default:
 		fmt.Fprintf(stderr, "unknown bootstrap command %q\n\n%s", args[0], bootstrapUsage)
 		return 2

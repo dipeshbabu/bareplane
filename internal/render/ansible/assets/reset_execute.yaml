@@ -1,0 +1,38 @@
+---
+- import_playbook: reset_validate.yaml
+
+- name: Reset only the validated bootstrap-owned cluster state
+  hosts: all
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Archive diagnostics and perform the controlled kubeadm cleanup
+      bareplane_reset:
+      args: "{{ bareplane_reset_parameters | combine({'operation': 'reset'}) }}"
+    - name: Reboot to clear volatile Cilium and VIP network state
+      ansible.builtin.reboot:
+        reboot_timeout: 300
+        connect_timeout: 5
+        post_reboot_delay: 5
+      when: not bareplane_reset_facts.reset_complete
+    - name: Verify reboot and record node reset completion
+      bareplane_reset:
+      args: "{{ bareplane_reset_parameters | combine({'operation': 'finish'}) }}"
+
+- name: Withdraw only the matching project-local admin credential
+  hosts: "control_plane[0]"
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Remove the validated canonical credential after cluster reset
+      bareplane_kubeconfig:
+        operation: withdraw
+        destination: "{{ inventory_dir }}/../state/bootstrap/admin.conf"
+        cluster: "{{ bareplane_cluster }}"
+        ca_sha256: "{{ bareplane_reset_parameters.ca_sha256 }}"
+        vip: "{{ bareplane_api_vip }}"
+      delegate_to: localhost
+      become: false
+      vars:
+        ansible_python_interpreter: "{{ ansible_playbook_python }}"

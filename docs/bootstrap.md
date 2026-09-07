@@ -267,4 +267,4 @@ Future execution code must keep private-key contents out of logs, generated inve
 
 ## Current limitation
 
-Bareplane can validate connectivity, persist approved host identities, and run guarded end-to-end bootstrap with private progress and a verified kubeconfig. Explicit destructive recovery remains issue #67; ordinary apply never performs an automatic reset.
+Bareplane can validate connectivity, persist approved host identities, and run guarded end-to-end bootstrap with private progress and a verified kubeconfig. [Explicit diagnosis and bootstrap-only recovery](bootstrap-recovery.md) are available; ordinary apply never performs an automatic reset.
