@@ -37,8 +37,8 @@ def require(condition, message):
         raise ValueError(message)
 
 
-def command(args):
-    result = subprocess.run(args, capture_output=True, timeout=20, check=True)
+def command(args, timeout=20):
+    result = subprocess.run(args, capture_output=True, timeout=timeout, check=True)
     require(len(result.stdout) <= 4 * 1024 * 1024, 'Reset inspection response exceeded its bound')
     return result.stdout
 
@@ -64,6 +64,27 @@ def owned_probe_sandbox(sandbox, cluster):
     nonce = annotations.get('bareplane.io/health-run', '')
     return (re.fullmatch(r'[a-f0-9]{16}', nonce) is not None and annotations.get('bareplane.io/cluster') == cluster
             and metadata.get('namespace') == 'bareplane-health-' + nonce and metadata.get('name') in ['server', 'client'])
+
+
+def sandbox_cleanup_order(sandbox):
+    name = sandbox.get('metadata', {}).get('name', '')
+    if name.startswith(('kube-apiserver-', 'kube-controller-manager-', 'kube-scheduler-', 'etcd-', 'kube-vip-')):
+        return 3, sandbox['id']
+    if name.startswith('cilium-') and not name.startswith('cilium-operator-'):
+        return 2, sandbox['id']
+    if name.startswith('cilium-operator-'):
+        return 1, sandbox['id']
+    return 0, sandbox['id']
+
+
+def remove_owned_sandboxes(sandboxes):
+    # Pod-network cleanup requires the Cilium agent. Remove workloads before
+    # Cilium, and retain the API/static control plane until those are gone.
+    for sandbox in sorted(sandboxes, key=sandbox_cleanup_order):
+        identifier = sandbox['id']
+        require(re.fullmatch(r'[a-f0-9]{64}', identifier), 'Invalid CRI sandbox identity blocks reset')
+        command(['crictl', 'stopp', identifier], timeout=45)
+        command(['crictl', 'rmp', identifier], timeout=45)
 
 
 def snapshot(path, helpers):
@@ -168,7 +189,7 @@ def inspect(p, helpers):
         if receipt.get('stage') in ['clean', 'complete']:
             require(not ca_hash and not Path('/etc/kubernetes/kubelet.conf').exists() and not Path('/var/lib/etcd/member').exists(),
                     'Kubernetes state reappeared after reset; refusing to reset it again')
-        return dict(state='resetting', ca_sha256=receipt.get('ca_sha256', ''), needs_reset=receipt.get('stage') not in ['clean', 'complete'])
+        return dict(state='resetting', ca_sha256=receipt.get('ca_sha256', ''), needs_reset=receipt.get('stage') not in ['clean', 'complete'], sandboxes=sandboxes)
     if receipt:
         require(receipt.get('stage') == 'complete', 'Another incomplete reset requires explicit recovery')
     primary = p['name'] == p['primary']
@@ -204,7 +225,7 @@ def inspect(p, helpers):
     vip = helpers.read_file('/etc/kubernetes/manifests/kube-vip.yaml')
     if vip is not None:
         require(hashlib.sha256(vip).hexdigest() in p['vip_hashes'], 'Modified or foreign kube-vip manifest blocks reset')
-    return dict(state=state, ca_sha256=ca_hash, needs_reset=state == 'owned')
+    return dict(state=state, ca_sha256=ca_hash, needs_reset=state == 'owned', sandboxes=sandboxes)
 
 
 def bootstrap_pods_only(pods, names):
@@ -280,6 +301,9 @@ def reset_node(p, helpers):
                     os.fsync(stream.fileno())
     command(['systemctl', 'stop', 'kubelet'])
     if result['needs_reset']:
+        current_ids = {item['id'] for item in json.loads(command(['crictl', 'pods', '-o', 'json'])).get('items', [])}
+        require(current_ids <= {item['id'] for item in result['sandboxes']}, 'New unvalidated CRI pods appeared during reset')
+        remove_owned_sandboxes([item for item in result['sandboxes'] if item['id'] in current_ids])
         descriptor, output = tempfile.mkstemp(prefix='reset-output-', dir=archive)
         with os.fdopen(descriptor, 'wb') as stream:
             subprocess.run(['kubeadm', 'reset', '--force', '--cri-socket=unix:///run/containerd/containerd.sock',

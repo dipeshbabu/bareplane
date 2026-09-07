@@ -23,6 +23,18 @@ helpers = load('join_helpers', root / 'module_utils/bareplane_join_state.py')
 
 
 class ResetTests(unittest.TestCase):
+    def test_networked_sandboxes_are_removed_before_cilium_and_control_plane(self):
+        names = ['kube-apiserver-cp1', 'cilium-agent', 'server', 'coredns-test', 'cilium-operator-test']
+        sandboxes = [dict(id=('%064x' % (index + 1)), metadata=dict(name=name)) for index, name in enumerate(names)]
+        with patch.object(reset, 'command') as command:
+            reset.remove_owned_sandboxes(sandboxes)
+        stopped = [call.args[0][-1] for call in command.call_args_list if call.args[0][1] == 'stopp']
+        by_id = {item['id']: item['metadata']['name'] for item in sandboxes}
+        ordered = [by_id[item] for item in stopped]
+        self.assertLess(ordered.index('server'), ordered.index('cilium-agent'))
+        self.assertLess(ordered.index('coredns-test'), ordered.index('cilium-agent'))
+        self.assertLess(ordered.index('cilium-agent'), ordered.index('kube-apiserver-cp1'))
+
     def test_pinned_kubelet_managed_state_roots_are_explicit(self):
         self.assertIn('dra_manager_state', reset.KUBELET_FILES)
         self.assertIn('image_manager', reset.KUBELET_FILES)
