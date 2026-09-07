@@ -62,6 +62,7 @@ def main():
     os.umask(0o077)
     work = Path(tempfile.mkdtemp(prefix='bareplane-join-vm-'))
     apply_mode = os.environ.get('BAREPLANE_TEST_BOOTSTRAP_APPLY') == '1'
+    recovery_mode = os.environ.get('BAREPLANE_TEST_BOOTSTRAP_RECOVERY') == '1'
     guests = []
     logs = []
     try:
@@ -83,7 +84,7 @@ def main():
         run(['sudo', 'iptables', '-t', 'nat', '-A', 'POSTROUTING', '-s', '192.0.2.0/24', '!', '-o', 'bp-ci', '-j', 'MASQUERADE'])
         run(['sudo', 'iptables', '-I', 'FORWARD', '-i', 'bp-ci', '-j', 'ACCEPT'])
         run(['sudo', 'iptables', '-I', 'FORWARD', '-o', 'bp-ci', '-j', 'ACCEPT'])
-        names = ['lab-control-1', 'lab-control-2', 'lab-control-3', 'lab-worker-1']
+        names = ['lab-control-1'] if recovery_mode else ['lab-control-1', 'lab-control-2', 'lab-control-3', 'lab-worker-1']
         hosts = {name: '192.0.2.' + str(11 + index) for index, name in enumerate(names)}
         for index, (name, address) in enumerate(hosts.items()):
             mac = f'52:54:00:12:34:{index + 1:02x}'
@@ -107,6 +108,8 @@ def main():
             ))))
             run(['cloud-localds', '--network-config=' + str(vm / 'network-config'), vm / 'seed.img', vm / 'user-data', vm / 'meta-data'])
             run(['qemu-img', 'create', '-f', 'qcow2', '-F', 'qcow2', '-b', image, vm / 'disk.qcow2', '24G'])
+            if recovery_mode:
+                run(['qemu-img', 'create', '-f', 'qcow2', vm / 'application-data.qcow2', '64M'])
             tap = 'bp-tap' + str(index)
             run(['sudo', 'ip', 'tuntap', 'add', 'dev', tap, 'mode', 'tap', 'user', os.environ['USER']])
             run(['sudo', 'ip', 'link', 'set', tap, 'master', 'bp-ci'])
@@ -115,10 +118,11 @@ def main():
             logs.append(log)
             guests.append(subprocess.Popen([
                 'qemu-system-x86_64', '-enable-kvm', '-cpu', 'host', '-smp', '2', '-m', '3072',
-                '-nographic', '-no-reboot', '-drive', f'file={vm / "disk.qcow2"},if=virtio,format=qcow2',
+                '-nographic', *([] if recovery_mode else ['-no-reboot']), '-drive', f'file={vm / "disk.qcow2"},if=virtio,format=qcow2',
                 '-drive', f'file={vm / "seed.img"},if=virtio,format=raw',
                 '-netdev', f'tap,id=net0,ifname={tap},script=no,downscript=no',
                 '-device', f'virtio-net-pci,netdev=net0,mac={mac}',
+                *(['-drive', f'file={vm / "application-data.qcow2"},if=virtio,format=qcow2'] if recovery_mode else []),
             ], stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT))
 
         def ssh(name, command, **kwargs):
@@ -149,12 +153,22 @@ def main():
                     if time.monotonic() >= deadline:
                         raise RuntimeError('Disposable guest did not synchronize its clock: ' + name)
                     time.sleep(2)
+            if recovery_mode:
+                # This exact empty 64 MiB disk was created above for this guest.
+                ssh(name, 'test "$(blockdev --getsize64 /dev/vdc)" = 67108864 && ! blkid /dev/vdc')
+                ssh(name, 'mkfs.ext4 -q /dev/vdc && mkdir /bareplane-user-data && mount /dev/vdc /bareplane-user-data')
+                disk_uuid = ssh(name, 'blkid -s UUID -o value /dev/vdc', capture_output=True, text=True).stdout.strip()
+                if not re.fullmatch(r'[a-f0-9-]{36}', disk_uuid):
+                    raise RuntimeError('Unexpected disposable application-disk identity')
+                ssh(name, "printf '%s\\n' 'UUID=" + disk_uuid + " /bareplane-user-data ext4 defaults 0 2' >> /etc/fstab")
+                ssh(name, "printf '%s\\n' 'preserve-application-data' > /bareplane-user-data/sentinel")
 
         config = yaml.safe_load((REPO / 'examples/bareplane.yaml').read_text())
         config['metadata']['name'] = 'lab'
         spec = config['spec']
-        spec['nodes'] = [dict(name='control', role='control-plane', count=3, cpu=2, memoryGB=3, diskGB=24),
-                         dict(name='worker', role='worker', count=1, cpu=2, memoryGB=3, diskGB=24)]
+        spec['nodes'] = [dict(name='control', role='control-plane', count=1 if recovery_mode else 3, cpu=2, memoryGB=3, diskGB=24)]
+        if not recovery_mode:
+            spec['nodes'].append(dict(name='worker', role='worker', count=1, cpu=2, memoryGB=3, diskGB=24))
         spec['features']['gpu'] = False
         spec['profiles'] = ['minimal']
         spec['bootstrap']['ssh'] = dict(user='root', privateKeyFile=str(key), hosts=hosts)
@@ -190,6 +204,30 @@ def main():
                     raise RuntimeError('A healthy CLI rerun reconfigured completed phases')
                 if (trust / '.operation.lock').exists():
                     raise RuntimeError('Successful apply did not release its operation lock')
+                if recovery_mode:
+                    run([REPO / 'bin/bareplane', 'bootstrap', 'diagnose', config_path])
+                    (trust / 'admin.conf').unlink()
+                    run([REPO / 'bin/bareplane', 'bootstrap', 'recover-kubeconfig', '--approve', 'lab', config_path])
+                    if not (trust / 'admin.conf').is_file():
+                        raise RuntimeError('Lost kubeconfig recovery did not restore the canonical file')
+                    previous_ca = ssh(names[0], 'sha256sum /etc/kubernetes/pki/ca.crt', capture_output=True, text=True).stdout.split()[0]
+                    # Image references are public fixture metadata, not runtime
+                    # environment/configuration or credential-bearing logs.
+                    runtime = json.loads(ssh(names[0], 'crictl ps -a -o json', capture_output=True, text=True).stdout)
+                    print('Disposable reset image references: ' + json.dumps([container.get('image', {}) for container in runtime.get('containers', [])]), flush=True)
+                    ssh(names[0], 'ls -1A /etc/kubernetes /var/lib/kubelet /var/lib/etcd')
+                    run([REPO / 'bin/bareplane', 'bootstrap', 'reset', '--approve', 'lab', '--scope', 'cluster', '--confirm-destructive', config_path])
+                    if (trust / 'admin.conf').exists() or (trust / 'reset.json').exists():
+                        raise RuntimeError('Reset left canonical credentials or unfinished local intent')
+                    preserved = ssh(names[0], 'cat /bareplane-user-data/sentinel', capture_output=True, text=True).stdout.strip()
+                    current_uuid = ssh(names[0], 'blkid -s UUID -o value /dev/vdc', capture_output=True, text=True).stdout.strip()
+                    if preserved != 'preserve-application-data' or current_uuid != disk_uuid:
+                        raise RuntimeError('Reset changed unrelated application-disk data')
+                    run(command)
+                    current_ca = ssh(names[0], 'sha256sum /etc/kubernetes/pki/ca.crt', capture_output=True, text=True).stdout.split()[0]
+                    if current_ca == previous_ca:
+                        raise RuntimeError('Rebootstrap reused the destroyed cluster CA')
+                    print('Reset/reboot/rebootstrap passed; unrelated application disk and sentinel were preserved.', flush=True)
             except subprocess.SubprocessError as error:
                 for output in [getattr(error, 'stdout', None), getattr(error, 'stderr', None)]:
                     if output:

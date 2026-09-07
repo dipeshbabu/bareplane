@@ -103,7 +103,9 @@ def smoke(client, cluster, server_node, client_node, nonce=None):
                            labels={'app.kubernetes.io/managed-by': 'bareplane', 'pod-security.kubernetes.io/enforce': 'restricted'})))
         uid = ns['metadata']['uid']
         require(ns['metadata'].get('annotations') == identity, 'Unexpected smoke namespace ownership')
-        client.create(probe_pod(namespace, 'server', server_node, ['sh', '-ec', "printf 'bareplane-health\\n' > /www/index.html; exec httpd -f -p 8080 -h /www"]))
+        server_probe = probe_pod(namespace, 'server', server_node, ['sh', '-ec', "printf 'bareplane-health\\n' > /www/index.html; exec httpd -f -p 8080 -h /www"])
+        server_probe['metadata']['annotations'] = identity
+        client.create(server_probe)
         client.text('-n', namespace, 'wait', '--for=condition=Ready', 'pod/server', '--timeout=90s', timeout=100)
         server = client.json('-n', namespace, 'get', 'pod', 'server', '-o', 'json')
         address = str(ipaddress.ip_address(server['status']['podIP']))
@@ -122,6 +124,7 @@ def smoke(client, cluster, server_node, client_node, nonce=None):
                   + 'do check_url "$url"; done')
         pod = probe_pod(namespace, 'client', client_node, ['sh', '-ec', script])
         pod['metadata']['labels'] = dict(app='bareplane-health-client')
+        pod['metadata']['annotations'] = identity
         client.create(pod)
         client.text('-n', namespace, 'wait', '--for=jsonpath={.status.phase}=Succeeded', 'pod/client', '--timeout=90s', timeout=100)
     finally:

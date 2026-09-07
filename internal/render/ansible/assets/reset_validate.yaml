@@ -1,0 +1,31 @@
+---
+- name: Validate reset ownership on every desired machine before any destruction
+  hosts: all
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  roles:
+    - role: contract
+      tags: [always]
+    - role: reset_inspect
+
+- name: Refuse application data and foreign local credentials
+  hosts: "control_plane[0]"
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Inspect cluster-wide application and storage state
+      bareplane_reset:
+      args: "{{ bareplane_reset_parameters | combine({'operation': 'guard'}) }}"
+    - name: Verify local kubeconfig ownership before resetting hosts
+      bareplane_kubeconfig:
+        operation: inspect
+        destination: "{{ inventory_dir }}/../state/bootstrap/admin.conf"
+        cluster: "{{ bareplane_cluster }}"
+        ca_sha256: "{{ bareplane_reset_parameters.ca_sha256 }}"
+        vip: "{{ bareplane_api_vip }}"
+      delegate_to: localhost
+      become: false
+      vars:
+        ansible_python_interpreter: "{{ ansible_playbook_python }}"

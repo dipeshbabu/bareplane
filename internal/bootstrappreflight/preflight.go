@@ -272,6 +272,10 @@ func safeRunnerError(runErr, contextErr error) error {
 }
 
 func commandRunner(binary string) Runner {
+	return fixedScriptRunner(binary, remoteFactsScript)
+}
+
+func fixedScriptRunner(binary, script string) Runner {
 	return func(ctx context.Context, request Request) ([]byte, error) {
 		timeoutSeconds := 1
 		if deadline, ok := ctx.Deadline(); ok {
@@ -283,7 +287,7 @@ func commandRunner(binary string) Runner {
 		var stdout boundedBuffer
 		stdout.limit = MaximumOutputSize
 		command := exec.CommandContext(ctx, binary, sshArguments(request, timeoutSeconds)...)
-		command.Stdin = strings.NewReader(remoteFactsScript)
+		command.Stdin = strings.NewReader(script)
 		command.Stdout = &stdout
 		command.Stderr = io.Discard
 		err := command.Run()

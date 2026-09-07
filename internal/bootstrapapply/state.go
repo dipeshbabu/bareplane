@@ -42,7 +42,7 @@ func (p Progress) validate() error {
 		if next == len(phases) {
 			next-- // A completed cluster may re-run its health gate.
 		}
-		if p.Active != phases[next] {
+		if p.Active != phases[next] && !(p.Completed >= 6 && p.Active == "kubeconfig") {
 			return errors.New("bootstrap progress is not a valid phase prefix")
 		}
 	}

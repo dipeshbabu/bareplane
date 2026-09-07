@@ -55,7 +55,7 @@ A fully completed cluster rechecks prerequisites and runs only the full health g
 
 Changing the cluster/network/version/topology/key reference or approved SSH identities invalidates the progress binding. Use explicit lifecycle/recovery planning rather than editing `progress.json`. Updating Bareplane itself is different: rerendering the current embedded implementation is allowed when the semantic bootstrap configuration and trust remain unchanged.
 
-Inspect a stale lock's recorded PID and confirm that no operation is active before removing that specific lock. Do not clear progress, initialization intent, or credential ownership records to force a rerun. Explicit reset/diagnosis workflows are issue #67.
+Inspect a stale lock's recorded PID on the original controller and confirm that no operation is active before removing that specific lock. Do not clear progress, initialization intent, or credential ownership records to force a rerun. Use the [explicit diagnosis and recovery workflows](bootstrap-recovery.md).
 
 `bootstrap apply --check` is deliberately refused: kubeadm and workload-based health verification cannot be truthfully simulated by a blanket dry run. Use offline rendering, local doctor, read-only preflight, and `validate.yaml` for the checks they actually provide.
 
