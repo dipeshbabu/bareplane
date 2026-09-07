@@ -355,7 +355,9 @@ def main():
             require(not digest or re.fullmatch(r'[a-f0-9]{64}', digest), 'Invalid reset CA identity')
             module.exit_json(changed=False, ca_sha256=digest, reset_complete=complete)
         elif p['operation'] == 'inspect':
-            module.exit_json(changed=False, **inspect(p, helpers))
+            summary = inspect(p, helpers)
+            summary.pop('sandboxes', None)
+            module.exit_json(changed=False, **summary)
         elif p['operation'] == 'guard':
             guard_api(p, helpers)
             module.exit_json(changed=False)
