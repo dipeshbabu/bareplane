@@ -118,7 +118,7 @@ def main():
             logs.append(log)
             guests.append(subprocess.Popen([
                 'qemu-system-x86_64', '-enable-kvm', '-cpu', 'host', '-smp', '2', '-m', '3072',
-                '-nographic', '-no-reboot', '-drive', f'file={vm / "disk.qcow2"},if=virtio,format=qcow2',
+                '-nographic', *([] if recovery_mode else ['-no-reboot']), '-drive', f'file={vm / "disk.qcow2"},if=virtio,format=qcow2',
                 '-drive', f'file={vm / "seed.img"},if=virtio,format=raw',
                 '-netdev', f'tap,id=net0,ifname={tap},script=no,downscript=no',
                 '-device', f'virtio-net-pci,netdev=net0,mac={mac}',
