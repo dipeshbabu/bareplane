@@ -33,6 +33,7 @@ type Spec struct {
 	Nodes      []NodeGroup       `yaml:"nodes"`
 	Bootstrap  *BootstrapConfig  `yaml:"bootstrap,omitempty"`
 	Kubernetes *KubernetesConfig `yaml:"kubernetes,omitempty"`
+	GitOps     *GitOpsConfig     `yaml:"gitops,omitempty"`
 	Features   Features          `yaml:"features"`
 	Profiles   []string          `yaml:"profiles"`
 	DNS        DNS               `yaml:"dns"`
@@ -153,6 +154,7 @@ func (c Config) Validate() error {
 	problems = append(problems, validateOptionalProxmoxProvisioning(c.Spec.Provider.Proxmox)...)
 	problems = append(problems, validateOptionalBootstrap(c.Spec.Bootstrap)...)
 	problems = append(problems, validateOptionalKubernetes(c.Spec.Kubernetes)...)
+	problems = append(problems, validateOptionalGitOps(c.Spec.GitOps)...)
 
 	if len(c.Spec.Nodes) == 0 {
 		problems = append(problems, "spec.nodes must contain at least one node group")
