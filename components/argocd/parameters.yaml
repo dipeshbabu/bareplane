@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cmd-params-cm
+  namespace: argocd
+data:
+  reposerver.enable.git.submodule: "false"
+  reposerver.parallelism.limit: "2"
+  reposerver.git.request.timeout: "30s"
+  controller.status.processors: "5"
+  controller.operation.processors: "2"
+  controller.kubectl.parallelism.limit: "5"
+  server.enable.gzip: "true"
