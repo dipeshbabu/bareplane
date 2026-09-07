@@ -215,6 +215,7 @@ def main():
                     # environment/configuration or credential-bearing logs.
                     runtime = json.loads(ssh(names[0], 'crictl ps -a -o json', capture_output=True, text=True).stdout)
                     print('Disposable reset image references: ' + json.dumps([container.get('image', {}) for container in runtime.get('containers', [])]), flush=True)
+                    ssh(names[0], 'ls -1A /etc/kubernetes /var/lib/kubelet /var/lib/etcd')
                     run([REPO / 'bin/bareplane', 'bootstrap', 'reset', '--approve', 'lab', '--scope', 'cluster', '--confirm-destructive', config_path])
                     if (trust / 'admin.conf').exists() or (trust / 'reset.json').exists():
                         raise RuntimeError('Reset left canonical credentials or unfinished local intent')

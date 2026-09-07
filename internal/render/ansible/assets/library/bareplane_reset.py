@@ -29,7 +29,7 @@ KUBE_FILES = {'admin.conf', 'super-admin.conf', 'kubelet.conf', 'bootstrap-kubel
               'scheduler.conf', '.bareplane-init-complete', 'manifests', 'pki'}
 KUBELET_FILES = {'.kubelet-keep', 'config.yaml', 'instance-config.yaml', 'kubeadm-flags.env', 'pki', 'pods', 'plugins',
                  'plugins_registry', 'device-plugins', 'pod-resources', 'cpu_manager_state', 'memory_manager_state',
-                 'checkpoints', 'allocated_pods_state', 'actuated_pods_state'}
+                 'checkpoints', 'allocated_pods_state', 'actuated_pods_state', 'dra_manager_state'}
 
 
 def require(condition, message):
@@ -145,7 +145,7 @@ def inspect(p, helpers):
     require(not os.path.ismount('/var/lib/kubelet'), 'A mounted kubelet data root blocks reset')
     for root, allowed in [('/etc/kubernetes', KUBE_FILES), ('/var/lib/kubelet', KUBELET_FILES), ('/var/lib/etcd', {'member'})]:
         if Path(root).exists():
-            require(set(os.listdir(root)) <= allowed, 'Unrecognized data in a Kubernetes-owned root blocks reset')
+            require(set(os.listdir(root)) <= allowed, 'Unrecognized data in the Kubernetes-owned root ' + root + ' blocks reset')
     if Path('/etc/kubernetes/manifests').exists():
         allowed = {'.kubelet-keep', 'kube-vip.yaml', 'kube-apiserver.yaml', 'kube-controller-manager.yaml', 'kube-scheduler.yaml', 'etcd.yaml'}
         require(set(os.listdir('/etc/kubernetes/manifests')) <= allowed, 'Unmanaged static pod manifests block reset')
