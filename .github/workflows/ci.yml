@@ -124,6 +124,9 @@ jobs:
           BAREPLANE_TEST_PUBLIC_GIT: '1'
         run: python -m unittest discover -s tests/ansible -p 'test_*.py'
 
+      - name: Test concurrent branch cleanup with isolated Git repositories
+        run: python -m unittest discover -s tests/github -p 'test_*.py'
+
       - name: Validate deterministic GitOps export and Kubernetes/Argo schemas
         run: |
           python -m pip install PyYAML==6.0.3 jsonschema==4.26.0 lupa==2.6
