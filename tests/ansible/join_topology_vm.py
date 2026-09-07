@@ -159,7 +159,7 @@ def main():
         spec['profiles'] = ['minimal']
         spec['bootstrap']['ssh'] = dict(user='root', privateKeyFile=str(key), hosts=hosts)
         spec['kubernetes']['apiVIP'] = '192.0.2.100'
-        project = work / ("project 'quoted' %h" if apply_mode else 'project')
+        project = work / ("project 'quoted' \"double\" %h" if apply_mode else 'project')
         project.mkdir()
         if apply_mode:
             controller_key = project / 'private-key'

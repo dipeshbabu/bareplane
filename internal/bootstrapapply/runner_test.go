@@ -22,6 +22,11 @@ func TestRunnerAcceptsOnlyOwnedPhasesAndControlledArguments(t *testing.T) {
 	if !reflect.DeepEqual(args, want) {
 		t.Fatalf("args = %#v, want %#v", args, want)
 	}
+	request.PrivateKeyFile = `/private/"quoted"\%h`
+	escaped, err := phaseArguments(request)
+	if err != nil || escaped[3] != `/private/\"quoted\"\\%%h` {
+		t.Fatalf("IdentityFile quoting was not preserved: %#v %v", escaped, err)
+	}
 	for _, phase := range []string{"site", "../../custom", "join.yaml", "join; reset", "--extra-vars"} {
 		request.Phase = phase
 		if _, err := phaseArguments(request); err == nil {

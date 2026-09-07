@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,7 +29,11 @@ func phaseArguments(request Request) ([]string, error) {
 	if !valid {
 		return nil, errors.New("only owned bootstrap phases may execute")
 	}
-	return []string{"--inventory", filepath.Join(request.BundleDir, "inventory.yaml"), "--private-key", strings.ReplaceAll(request.PrivateKeyFile, "%", "%%"), request.Phase + ".yaml"}, nil
+	// Ansible wraps this value in double quotes in its IdentityFile option.
+	// Escape the inner OpenSSH configuration string, not a shell command.
+	identity := strconv.Quote(strings.ReplaceAll(request.PrivateKeyFile, "%", "%%"))
+	identity = identity[1 : len(identity)-1]
+	return []string{"--inventory", filepath.Join(request.BundleDir, "inventory.yaml"), "--private-key", identity, request.Phase + ".yaml"}, nil
 }
 
 func controlledEnvironment(base []string, request Request) []string {
