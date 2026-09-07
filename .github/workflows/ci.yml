@@ -115,7 +115,7 @@ jobs:
           BAREPLANE_TEST_ANSIBLE: '1'
         run: |
           go test -count=1 -v ./internal/render/ansible -run TestBundleAnsibleIntegration
-          go test -count=1 -v ./internal/bootstrapapply -run TestControlledAnsibleIntegration
+          go test -count=1 -v ./internal/bootstrapapply -run 'TestControlled.*Integration'
 
       - name: Test VIP interface and conflict detection
         run: python -m unittest discover -s tests/ansible -p 'test_*.py'

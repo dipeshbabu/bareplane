@@ -3,10 +3,13 @@ package bootstrapapply
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -106,5 +109,65 @@ func TestControlledAnsibleIntegration(t *testing.T) {
 	}
 	if _, _, err := verifyBundle(f.path, f.cfg); err != nil {
 		t.Fatalf("Ansible changed the owned bundle: %v", err)
+	}
+}
+
+func TestControlledSSHArgumentIntegration(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Ansible controller is Linux-only")
+	}
+	binary, err := exec.LookPath("ansible-playbook")
+	if err != nil {
+		if os.Getenv("BAREPLANE_TEST_ANSIBLE") == "1" {
+			t.Fatal(err)
+		}
+		t.Skip("ansible-playbook is not installed")
+	}
+	f := newFixture(t)
+	original := filepath.Dir(f.path)
+	directory := original + ` "double"`
+	if err := os.Rename(original, directory); err != nil {
+		t.Fatal(err)
+	}
+	f.path = filepath.Join(directory, "bareplane.yaml")
+	f.bundle = filepath.Join(directory, ".bareplane", "bootstrap")
+	f.key = filepath.Join(directory, "private-key")
+	f.trust = filepath.Join(directory, ".bareplane", "state", "bootstrap", "known_hosts")
+	bin := t.TempDir()
+	trace := filepath.Join(bin, "ssh-arguments.json")
+	encoded, _ := json.Marshal(trace)
+	script := "#!/usr/bin/python3\nimport json,sys\nwith open(" + string(encoded) + ", 'w') as output: json.dump(sys.argv[1:], output)\nsys.exit(255)\n"
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	var output bytes.Buffer
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	defer cancel()
+	err = commandRunner(binary)(ctx, Request{Phase: "host_prepare", BundleDir: f.bundle, StateDir: filepath.Dir(f.trust),
+		PrivateKeyFile: f.key, KnownHostsFile: f.trust, Log: &output})
+	if err == nil || ctx.Err() != nil {
+		t.Fatalf("fake SSH did not stop the phase safely: %v", err)
+	}
+	data, err := os.ReadFile(trace)
+	if err != nil {
+		t.Fatalf("SSH was not invoked: %v\n%s", err, output.String())
+	}
+	var args []string
+	if err := json.Unmarshal(data, &args); err != nil {
+		t.Fatal(err)
+	}
+	wantTrust := "UserKnownHostsFile=" + strconv.Quote(strings.ReplaceAll(f.bundle+"/../state/bootstrap/known_hosts", "%", "%%"))
+	wantKey := "IdentityFile=" + strconv.Quote(strings.ReplaceAll(f.key, "%", "%%"))
+	for _, want := range []string{wantTrust, wantKey} {
+		found := false
+		for _, arg := range args {
+			if arg == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("SSH argument %q missing from %#v", want, args)
+		}
 	}
 }
