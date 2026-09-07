@@ -39,7 +39,7 @@ Bareplane must not directly apply the platform/profile payload during handoff. T
 The deterministic renderer follows this layout, with `rootPath` selecting the cluster's Application set:
 
 ```text
-README.md
+readme.md
 bootstrap/
   <cluster>-root-application.yaml
 clusters/<cluster>/                 # example rootPath
@@ -68,4 +68,4 @@ The base schema has no passwords, tokens, private keys, credential references, i
 
 A future private-repository feature may add a separately reviewed secret-reference contract, scoped Git/Argo credentials, host/TLS trust, rotation/revocation, and audit-safe delivery. It must not add plaintext credentials to the base config or generated Git history. This issue defines that boundary only; private repository access is not implemented.
 
-Defining this contract performs no repository writes or Kubernetes mutation. Deterministic rendering, Argo installation, handoff, and dependency-driven profile selection are separate implementation issues.
+The contract performs no Kubernetes mutation. The [offline renderer](gitops-render.md) now creates a managed local export; Argo installation, handoff, and dependency-driven profile selection are separate implementation issues.
