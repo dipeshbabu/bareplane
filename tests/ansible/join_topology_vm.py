@@ -211,6 +211,10 @@ def main():
                     if not (trust / 'admin.conf').is_file():
                         raise RuntimeError('Lost kubeconfig recovery did not restore the canonical file')
                     previous_ca = ssh(names[0], 'sha256sum /etc/kubernetes/pki/ca.crt', capture_output=True, text=True).stdout.split()[0]
+                    # Image references are public fixture metadata, not runtime
+                    # environment/configuration or credential-bearing logs.
+                    runtime = json.loads(ssh(names[0], 'crictl ps -a -o json', capture_output=True, text=True).stdout)
+                    print('Disposable reset image references: ' + json.dumps([container.get('image', {}) for container in runtime.get('containers', [])]), flush=True)
                     run([REPO / 'bin/bareplane', 'bootstrap', 'reset', '--approve', 'lab', '--scope', 'cluster', '--confirm-destructive', config_path])
                     if (trust / 'admin.conf').exists() or (trust / 'reset.json').exists():
                         raise RuntimeError('Reset left canonical credentials or unfinished local intent')
