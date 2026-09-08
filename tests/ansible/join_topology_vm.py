@@ -176,6 +176,8 @@ def main():
         spec['profiles'] = ['minimal']
         if argocd_mode:
             spec['features']['observability'] = False
+            # This is the explicit M1/M2 baseline, not future optional core defaults.
+            spec['components'] = yaml.safe_load((REPO / 'examples/gitops-fixture.yaml').read_text())['spec']['components']
             spec['dns']['provider'] = 'manual'
             spec['secrets']['provider'] = 'sops'
             # Public immutable fixture proves Git reachability only. No remote

@@ -2,6 +2,8 @@
 
 The optional [`spec.gitops` contract](gitops.md) defines a public HTTPS repository, explicit revision, and safe repository-relative root path. It contains no credentials and does not itself mutate Kubernetes.
 
+The optional [`spec.components` selection](component-selection.md) enables or disables known registry IDs without overriding required dependencies, ownership, or availability checks.
+
 Bareplane uses a single versioned `bareplane.yaml` file as the user-facing source of intent.
 
 ## Initialize

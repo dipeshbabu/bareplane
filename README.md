@@ -55,6 +55,8 @@ The [minimal Argo installer](docs/gitops-install.md) requires completed bootstra
 
 The [root handoff](docs/gitops-handoff.md) verifies a published snapshot, pins initial root/child reconciliation, then transfers steady-state ownership to Git. Status distinguishes the recorded Kubernetes, Argo, and handed-off stages without claiming a live health scan.
 
+[Explicit component selections](docs/component-selection.md) use the dependency registry to validate optional enable/disable choices without bypassing required foundations or implementation status.
+
 ## Development
 
 The [v0.1 acceptance baseline](docs/acceptance.md) combines a fast mocked full lifecycle with real disposable Kubernetes/Argo jobs and a separate operator-run Proxmox RC procedure. See the [release checklist](docs/release-checklist.md), [compatibility record](docs/compatibility.json), and [known limitations](docs/known-limitations.md) before calling a candidate release-ready.
