@@ -12,6 +12,7 @@ import signal
 import stat
 import subprocess
 import tempfile
+import time
 
 from ansible.module_utils import bareplane_join_state as owned
 from ansible.module_utils.bareplane_kubelet_tls_state import Record, private_read, publish
@@ -51,8 +52,11 @@ def configuration():
 def process_contract(identity):
     pid = owned.run(['systemctl', 'show', 'kubelet', '--property=MainPID', '--value']).decode().strip()
     require(re.fullmatch(r'[1-9][0-9]{0,9}', pid), 'Kubelet must be running before serving-TLS maintenance')
-    command = owned.read_file('/proc/' + pid + '/cmdline').split(b'\0')
+    raw = owned.read_file('/proc/' + pid + '/cmdline')
+    require(raw, 'Kubelet process has not executed its reviewed command yet')
+    command = raw.split(b'\0')
     require(command[0] == b'/usr/bin/kubelet', 'Kubelet is not running the reviewed binary path')
+    require(os.readlink('/proc/' + pid + '/exe') == '/usr/bin/kubelet', 'Kubelet executable identity differs from its command line')
     config = [arg for arg in command if arg == b'--config' or arg.startswith(b'--config=')]
     require(config == [b'--config=' + CONFIG.encode()], 'Kubelet configuration path is overridden or ambiguous')
     for arg in command[1:]:
@@ -61,6 +65,20 @@ def process_contract(identity):
                              b'--anonymous-auth', b'--authorization-mode'}, 'A command-line override blocks reviewed serving-TLS configuration')
         if name in {b'--node-ip', b'--hostname-override'}:
             require(value == identity['address' if name == b'--node-ip' else 'name'].encode(), 'Kubelet command-line identity differs from inventory')
+
+
+def wait_process_contract(identity):
+    # With a simple systemd service, restart may return after fork but before
+    # exec. MainPID can briefly identify systemd's child with its old argv. Wait
+    # only after our recorded restart, and accept only the full strict contract.
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            process_contract(identity)
+            return
+        except (NodeTLSRefusal, OSError, subprocess.SubprocessError):
+            require(time.monotonic() < deadline, 'Kubelet did not start the reviewed process within the bounded restart deadline')
+            time.sleep(0.1)
 
 
 def inspect(identity, node, primary, vip):
@@ -160,7 +178,7 @@ def configure(original, target, record, identity):
                 os.unlink(temporary)
     record.save(dict(state, stage='configured'))
     owned.run(['systemctl', 'restart', 'kubelet'])
-    process_contract(identity)
+    wait_process_contract(identity)
     require(configuration() == target, 'Kubelet configuration changed after restart')
     record.save(dict(state, stage='complete'))
     return True

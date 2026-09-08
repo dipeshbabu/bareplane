@@ -98,3 +98,13 @@ class ServingNodeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.node.configure(self.target, self.target, self.record(), self.identity)
         self.assertEqual(self.config.read_bytes(), b'operator edit\n')
+
+    def test_restart_waits_for_exec_but_never_accepts_an_unreviewed_process(self):
+        with patch.object(self.node, 'process_contract', side_effect=[self.node.NodeTLSRefusal('fork before exec'), None]) as verify:
+            with patch.object(self.node.time, 'sleep'):
+                self.node.wait_process_contract(self.identity)
+            self.assertEqual(verify.call_count, 2)
+        with patch.object(self.node, 'process_contract', side_effect=self.node.NodeTLSRefusal('foreign process')):
+            with patch.object(self.node.time, 'monotonic', side_effect=[0, 11]):
+                with self.assertRaises(self.node.NodeTLSRefusal):
+                    self.node.wait_process_contract(self.identity)
