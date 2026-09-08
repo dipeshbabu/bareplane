@@ -1,5 +1,9 @@
 # Guarded bootstrap apply
 
+After cluster formation, [verified kubelet serving TLS](kubelet-tls.md) is an
+explicit maintenance command. It does not replay formation phases or transfer
+Kubernetes PKI ownership to Argo.
+
 `bareplane bootstrap apply --approve <cluster-name> [path]` runs only the current Bareplane-owned Ansible phases. It is not an Ansible argument passthrough and never invokes Terraform, resets Kubernetes, or adopts an untracked cluster.
 
 Use a Linux/WSL controller with `ansible-core==2.19.9`, OpenSSL 3, SSH tooling, and kubectl at the exact configured Kubernetes version. Authentication must work non-interactively with the configured private key and sudo; SSH agent/password fallback is disabled.

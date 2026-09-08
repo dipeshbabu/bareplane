@@ -1,0 +1,82 @@
+---
+- name: Read the current public node identity from the owned primary
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --request-timeout=5s, get, node, "{{ inventory_hostname }}", -o, json]
+  delegate_to: "{{ bareplane_primary_control_plane }}"
+  changed_when: false
+  register: bareplane_tls_node_api
+
+- name: Bind the desired identity to inventory and the verified primary CA
+  bareplane_vip_probe:
+    vip: "{{ bareplane_api_vip }}"
+    check_conflicts: false
+  register: bareplane_tls_network
+
+- name: Reconstruct the exact bootstrap-owned node identity
+  ansible.builtin.set_fact:
+    bareplane_tls_identity:
+      cluster: "{{ bareplane_cluster }}"
+      name: "{{ inventory_hostname }}"
+      address: "{{ bareplane_tls_network.node_address }}"
+      endpoint: "{{ bareplane_api_vip }}:{{ bareplane_api_port }}"
+      control_plane: "{{ inventory_hostname in bareplane_control_planes }}"
+      version: "{{ bareplane_kubernetes_version }}"
+      ca_sha256: "{{ hostvars[bareplane_primary_control_plane].bareplane_join_primary.ca_sha256 }}"
+
+- name: Prove node-local ownership, authenticated identity and configuration
+  bareplane_kubelet_tls_node:
+    operation: inspect
+    identity: "{{ bareplane_tls_identity }}"
+    node: "{{ bareplane_tls_node_api.stdout | from_json }}"
+    primary: "{{ inventory_hostname == bareplane_primary_control_plane }}"
+    vip: "{{ bareplane_api_vip }}"
+  register: bareplane_tls_inspection
+  no_log: true
+
+- name: Validate the strict single-field kubelet transition on the controller
+  bareplane_kubelet_tls:
+    operation: plan
+    configuration: "{{ bareplane_tls_inspection.configuration }}"
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  register: bareplane_tls_plan
+  no_log: true
+
+- name: Back up and configure only the approved owned kubelet
+  bareplane_kubelet_tls_node:
+    operation: configure
+    approved: "{{ bareplane_kubelet_tls_approved | default(false) }}"
+    identity: "{{ bareplane_tls_identity }}"
+    node: "{{ bareplane_tls_node_api.stdout | from_json }}"
+    primary: "{{ inventory_hostname == bareplane_primary_control_plane }}"
+    vip: "{{ bareplane_api_vip }}"
+    original: "{{ bareplane_tls_inspection.configuration }}"
+    target: "{{ bareplane_tls_plan.target }}"
+  no_log: true
+
+- name: Approve only the inventory-bound request and verify real serving TLS
+  bareplane_kubelet_tls:
+    operation: approve
+    approved: "{{ bareplane_kubelet_tls_approved | default(false) }}"
+    identity: "{{ bareplane_tls_inspection.identity }}"
+    kubeconfig: "{{ inventory_dir }}/../state/bootstrap/admin.conf"
+    vip: "{{ bareplane_api_vip }}"
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  register: bareplane_tls_result
+
+- name: Require verified serving readiness without printing credential material
+  ansible.builtin.assert:
+    that: bareplane_tls_result.ready | default(false)
+    quiet: true
+    fail_msg: Owned kubelet serving TLS has not been verified.
+
+- name: Clear transient configuration facts
+  ansible.builtin.set_fact:
+    bareplane_tls_inspection: {}
+    bareplane_tls_plan: {}
+  no_log: true

@@ -23,20 +23,24 @@ func phaseArguments(request Request) ([]string, error) {
 	valid := false
 	recovery := request.RecoveryID != ""
 	argo := request.Argo != nil
+	tls := request.KubeletServingTLS
 	if argo {
 		phase, kind := "argocd", "argocd-input"
 		if request.Argo.Handoff {
 			phase, kind = "handoff", "handoff-input"
 		}
-		valid = !recovery && request.Phase == phase && validDigest(request.Argo.Contract) &&
+		valid = !recovery && !tls && request.Phase == phase && validDigest(request.Argo.Contract) &&
 			request.Argo.PayloadDir == filepath.Join(request.StateDir, kind) &&
 			(!request.Argo.Handoff || validDigest(request.Argo.HandoffContract))
 	}
 	if recovery {
-		valid = !argo && validResetID(request.RecoveryID) && (request.Phase == "reset_validate" || request.Phase == "reset_execute")
+		valid = !argo && !tls && validResetID(request.RecoveryID) && (request.Phase == "reset_validate" || request.Phase == "reset_execute")
+	}
+	if tls {
+		valid = !argo && !recovery && request.Phase == "health"
 	}
 	for _, phase := range phases {
-		if !recovery && !argo && phase == request.Phase {
+		if !recovery && !argo && !tls && phase == request.Phase {
 			valid = true
 		}
 	}
@@ -60,6 +64,10 @@ func phaseArguments(request Request) ([]string, error) {
 			"bareplane_gitops_root_path": request.Argo.RootPath, "bareplane_argocd_input": request.Argo.PayloadDir,
 			"bareplane_gitops_contract": request.Argo.Contract})
 		args = append(args, "--extra-vars", string(variables))
+	}
+	if tls {
+		variables, _ := json.Marshal(map[string]any{"bareplane_kubelet_tls_approved": true})
+		return append(args, "--extra-vars", string(variables), "kubelet_tls.yaml"), nil
 	}
 	return append(args, request.Phase+".yaml"), nil
 }

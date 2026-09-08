@@ -29,6 +29,7 @@ const bootstrapUsage = `Usage:
   bareplane bootstrap diagnose [path]
   bareplane bootstrap reset --approve <cluster-name> --scope cluster --confirm-destructive [path]
   bareplane bootstrap recover-kubeconfig --approve <cluster-name> [path]
+  bareplane bootstrap kubelet-tls --approve <cluster-name> [path]
 
 Commands:
   render     Render the deterministic Ansible bootstrap bundle offline
@@ -40,6 +41,7 @@ Commands:
   diagnose   Inspect local progress, operation locks, and remote ownership markers
   reset      Explicitly reset and reboot a verified bootstrap-only cluster
   recover-kubeconfig  Recover a lost project credential and verify health
+  kubelet-tls  Enable or renew inventory-verified kubelet serving certificates
 `
 
 func runBootstrap(args []string, stdout, stderr io.Writer) int {
@@ -69,6 +71,8 @@ func runBootstrap(args []string, stdout, stderr io.Writer) int {
 		return runBootstrapReset(args[1:], stdout, stderr)
 	case "recover-kubeconfig":
 		return runBootstrapApply(args[1:], stdout, stderr, bootstrapapply.Options{RecoverCredentials: true})
+	case "kubelet-tls":
+		return runBootstrapApply(args[1:], stdout, stderr, bootstrapapply.Options{KubeletServingTLS: true})
 	default:
 		fmt.Fprintf(stderr, "unknown bootstrap command %q\n\n%s", args[0], bootstrapUsage)
 		return 2
