@@ -1,0 +1,16 @@
+{
+  "go_minimum": "1.23",
+  "terraform": "1.16.0",
+  "proxmox_reference": "9.2",
+  "proxmox_provider_constraint": "~> 0.111.1",
+  "kubernetes_reference": "1.36.4",
+  "kube_vip": "1.2.3",
+  "cilium": "1.20.1",
+  "ansible_core": "2.19.9",
+  "argocd": "3.5.2",
+  "containerd": "2.2.6",
+  "helm_bootstrap": "3.21.4",
+  "guest_reference": "Ubuntu 24.04 amd64",
+  "additional_ci_guest": "Debian 12 amd64",
+  "proxmox_evidence": "operator release-candidate acceptance required; not supplied by hosted CI"
+}

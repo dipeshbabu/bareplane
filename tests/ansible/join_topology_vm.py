@@ -192,7 +192,11 @@ def main():
             controller_key.chmod(0o600)
             spec['bootstrap']['ssh']['privateKeyFile'] = str(controller_key)
         config_path = project / 'bareplane.yaml'
+        if handoff_mode:
+            run([REPO / 'bin/bareplane', 'init', config_path])
         write_yaml(config_path, config)
+        if handoff_mode:
+            run([REPO / 'bin/bareplane', 'validate', config_path])
         run([REPO / 'bin/bareplane', 'bootstrap', 'render', config_path])
         bundle = project / '.bareplane/bootstrap'
         trust = project / '.bareplane/state/bootstrap'
@@ -201,6 +205,10 @@ def main():
             # SSH readiness above already pinned these generated VM host keys.
             # Exercise the real explicit trust workflow for the CLI test.
             run([REPO / 'bin/bareplane', 'bootstrap', 'trust', config_path], input=b'lab\n')
+            if handoff_mode:
+                run([REPO / 'bin/bareplane', 'bootstrap', 'doctor', config_path])
+                run([REPO / 'bin/bareplane', 'bootstrap', 'check', config_path])
+                run([REPO / 'bin/bareplane', 'bootstrap', 'preflight', config_path])
             command = [REPO / 'bin/bareplane', 'bootstrap', 'apply', '--approve', 'lab', config_path]
             try:
                 run(command)

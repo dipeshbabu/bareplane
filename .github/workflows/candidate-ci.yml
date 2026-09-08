@@ -1,0 +1,29 @@
+name: Candidate CI prerequisite
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact default-branch source commit to verify (not a tag or branch)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  verify:
+    name: Verify exact candidate CI; no publishing
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Refuse pending, failed, skipped, stale, or non-default-branch CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: python .github/scripts/verify_candidate.py
