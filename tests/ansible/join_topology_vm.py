@@ -65,6 +65,7 @@ def main():
     work = Path(tempfile.mkdtemp(prefix='bareplane-join-vm-'))
     apply_mode = os.environ.get('BAREPLANE_TEST_BOOTSTRAP_APPLY') == '1'
     recovery_mode = os.environ.get('BAREPLANE_TEST_BOOTSTRAP_RECOVERY') == '1'
+    kubelet_tls_mode = os.environ.get('BAREPLANE_TEST_KUBELET_TLS') == '1'
     cert_manager_mode = os.environ.get('BAREPLANE_TEST_CERT_MANAGER') == '1'
     handoff_mode = os.environ.get('BAREPLANE_TEST_GITOPS_HANDOFF') == '1' or cert_manager_mode
     argocd_mode = os.environ.get('BAREPLANE_TEST_ARGOCD_INSTALL') == '1' or handoff_mode
@@ -228,6 +229,31 @@ def main():
                     raise RuntimeError('A healthy CLI rerun reconfigured completed phases')
                 if (trust / '.operation.lock').exists():
                     raise RuntimeError('Successful apply did not release its operation lock')
+                if kubelet_tls_mode:
+                    # All four real nodes cover the primary, joined control
+                    # planes and worker ownership contracts independently.
+                    tls = [REPO / 'bin/bareplane', 'bootstrap', 'kubelet-tls', '--approve', 'lab', config_path]
+                    run(tls)
+                    identities = {}
+                    receipts = {}
+                    tls_ca = ssh(names[0], 'sha256sum /etc/kubernetes/pki/ca.crt', capture_output=True, text=True).stdout.split()[0]
+                    for name in names:
+                        receipt = trust / ('kubelet-tls-' + name + '-' + tls_ca + '.json')
+                        receipts[name] = receipt.read_bytes()
+                        record = json.loads(receipts[name])
+                        if record['state']['stage'] != 'ready' or record['identity']['address'] != hosts[name]:
+                            raise RuntimeError('Serving TLS did not record verified per-node identity')
+                        identities[name] = ssh(name, 'systemctl show kubelet --property=MainPID --value', capture_output=True, text=True).stdout.strip()
+                    run(tls)
+                    for name in names:
+                        if (trust / ('kubelet-tls-' + name + '-' + tls_ca + '.json')).read_bytes() != receipts[name]:
+                            raise RuntimeError('Unchanged serving TLS rerun rewrote its approval receipt')
+                        observed = ssh(name, 'systemctl show kubelet --property=MainPID --value', capture_output=True, text=True).stdout.strip()
+                        if observed != identities[name]:
+                            raise RuntimeError('Unchanged serving TLS rerun restarted a kubelet')
+                    if (trust / '.operation.lock').exists():
+                        raise RuntimeError('Serving TLS maintenance left an operation lock')
+                    print('All four owned kubelets served CA-verified inventory-bound certificates; unchanged maintenance performed no approvals or kubelet restarts.', flush=True)
                 if argocd_mode:
                     kubectl = ['kubectl', '--kubeconfig', str(trust / 'admin.conf'), '--request-timeout=10s']
 
@@ -330,6 +356,7 @@ def main():
                         if cert_manager_mode:
                             run_cert_manager_acceptance(kubectl, REPO, work)
                 if recovery_mode:
+                    run([REPO / 'bin/bareplane', 'bootstrap', 'kubelet-tls', '--approve', 'lab', config_path])
                     run([REPO / 'bin/bareplane', 'bootstrap', 'diagnose', config_path])
                     (trust / 'admin.conf').unlink()
                     run([REPO / 'bin/bareplane', 'bootstrap', 'recover-kubeconfig', '--approve', 'lab', config_path])
@@ -352,6 +379,9 @@ def main():
                     current_ca = ssh(names[0], 'sha256sum /etc/kubernetes/pki/ca.crt', capture_output=True, text=True).stdout.split()[0]
                     if current_ca == previous_ca:
                         raise RuntimeError('Rebootstrap reused the destroyed cluster CA')
+                    run([REPO / 'bin/bareplane', 'bootstrap', 'kubelet-tls', '--approve', 'lab', config_path])
+                    if len(list(trust.glob('kubelet-tls-' + names[0] + '-*.json'))) != 2:
+                        raise RuntimeError('Rebootstrap did not retain separate old/new CA-bound serving TLS audit receipts')
                     print('Reset/reboot/rebootstrap passed; unrelated application disk and sentinel were preserved.', flush=True)
             except subprocess.SubprocessError as error:
                 for output in [getattr(error, 'stdout', None), getattr(error, 'stderr', None)]:

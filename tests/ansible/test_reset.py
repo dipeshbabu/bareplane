@@ -1,5 +1,6 @@
 """Reset refusal boundaries without executing destructive operations locally."""
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -23,6 +24,27 @@ helpers = load('join_helpers', root / 'module_utils/bareplane_join_state.py')
 
 
 class ResetTests(unittest.TestCase):
+    def test_serving_tls_reset_requires_completed_matching_ca_and_unmodified_backup(self):
+        backup, current = b'original kubelet configuration', b'configured kubelet'
+        record = dict(version=1, identity=dict(cluster='lab', node='cp1', caSHA256='a' * 64), state=dict(
+            stage='complete', originalSHA256=hashlib.sha256(backup).hexdigest(), targetSHA256=hashlib.sha256(current).hexdigest()))
+        files = {reset.STATE + '/kubelet-tls.json': json.dumps(record).encode(),
+                 reset.STATE + '/kubelet-config-before-tls.yaml': backup, '/var/lib/kubelet/config.yaml': current}
+        fake = types.SimpleNamespace(read_file=lambda path: files.get(path))
+        reset.inspect_serving_tls(dict(cluster='lab', name='cp1'), fake, 'a' * 64)
+        with self.assertRaises(ValueError):
+            reset.inspect_serving_tls(dict(cluster='lab', name='cp1'), fake, 'b' * 64)
+        for stage in ['prepared', 'configured']:
+            record['state']['stage'] = stage
+            files[reset.STATE + '/kubelet-tls.json'] = json.dumps(record).encode()
+            with self.assertRaises(ValueError):
+                reset.inspect_serving_tls(dict(cluster='lab', name='cp1'), fake, 'a' * 64)
+        record['state']['stage'] = 'complete'
+        files[reset.STATE + '/kubelet-tls.json'] = json.dumps(record).encode()
+        files[reset.STATE + '/kubelet-config-before-tls.yaml'] = b'operator edit'
+        with self.assertRaises(ValueError):
+            reset.inspect_serving_tls(dict(cluster='lab', name='cp1'), fake, 'a' * 64)
+
     def test_networked_sandboxes_are_removed_before_cilium_and_control_plane(self):
         names = ['kube-apiserver-cp1', 'cilium-agent', 'server', 'coredns-test', 'cilium-operator-test']
         sandboxes = [dict(id=('%064x' % (index + 1)), metadata=dict(name=name)) for index, name in enumerate(names)]

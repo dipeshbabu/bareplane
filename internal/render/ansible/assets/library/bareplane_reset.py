@@ -24,7 +24,8 @@ CILIUM_IMAGES = {
                '6c3885fc7b629099fdbe2a5c87869c86feb825fa18fae299eac0f61918d16ecf'),
 }
 OWNED_STATE = ['init-intent', 'init-ca-sha256', 'kubeadm.yaml', 'init-output', 'join-intent', 'join-complete',
-               'join.yaml', 'join-output', 'cilium-intent', 'cilium-complete', 'cilium-values.yaml']
+               'join.yaml', 'join-output', 'cilium-intent', 'cilium-complete', 'cilium-values.yaml',
+               'kubelet-tls.json', 'kubelet-config-before-tls.yaml', '.kubelet-tls.lock']
 KUBE_FILES = {'admin.conf', 'super-admin.conf', 'kubelet.conf', 'bootstrap-kubelet.conf', 'controller-manager.conf',
               'scheduler.conf', '.bareplane-init-complete', 'manifests', 'pki'}
 KUBELET_FILES = {'.kubelet-keep', 'config.yaml', 'instance-config.yaml', 'kubeadm-flags.env', 'pki', 'pods', 'plugins',
@@ -182,6 +183,7 @@ def inspect(p, helpers):
     ca = helpers.read_file('/etc/kubernetes/pki/ca.crt')
     ca_hash = hashlib.sha256(ca).hexdigest() if ca else ''
     receipt = snapshot(RECEIPT, helpers)
+    inspect_serving_tls(p, helpers, ca_hash or (receipt.get('ca_sha256', '') if receipt and receipt.get('reset_id') == p['reset_id'] else ''))
     if receipt and receipt.get('reset_id') == p['reset_id']:
         require(receipt.get('cluster') == p['cluster'] and receipt.get('node') == p['name'] and receipt.get('version') == 1,
                 'Reset receipt belongs to a different node or cluster')
@@ -226,6 +228,27 @@ def inspect(p, helpers):
     if vip is not None:
         require(hashlib.sha256(vip).hexdigest() in p['vip_hashes'], 'Modified or foreign kube-vip manifest blocks reset')
     return dict(state=state, ca_sha256=ca_hash, needs_reset=state == 'owned', sandboxes=sandboxes)
+
+
+def inspect_serving_tls(p, helpers, ca_hash):
+    """Only completed, CA-bound TLS metadata joins the reset diagnostic archive."""
+    data = helpers.read_file(STATE + '/kubelet-tls.json')
+    backup = helpers.read_file(STATE + '/kubelet-config-before-tls.yaml')
+    if data is None:
+        require(backup is None, 'Unfinished serving TLS backup requires approved maintenance recovery before reset')
+        return
+    require(len(data) <= 4096, 'Serving TLS receipt exceeds its reset inspection bound')
+    record = json.loads(data)
+    require(set(record) == {'version', 'identity', 'state'} and type(record['version']) is int and record['version'] == 1,
+            'Invalid serving TLS receipt blocks reset')
+    identity, state = record['identity'], record['state']
+    require(identity.get('cluster') == p['cluster'] and identity.get('node') == p['name'] and identity.get('caSHA256') == ca_hash and ca_hash,
+            'Foreign serving TLS ownership blocks reset')
+    require(set(state) == {'stage', 'originalSHA256', 'targetSHA256'} and state['stage'] == 'complete',
+            'Finish interrupted serving TLS maintenance before destructive reset')
+    require(backup is not None and hashlib.sha256(backup).hexdigest() == state['originalSHA256'], 'Serving TLS backup changed before reset')
+    current = helpers.read_file('/var/lib/kubelet/config.yaml')
+    require(current is None or hashlib.sha256(current).hexdigest() == state['targetSHA256'], 'Serving TLS configuration drift blocks reset')
 
 
 def bootstrap_pods_only(pods, names):

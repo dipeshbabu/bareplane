@@ -38,6 +38,7 @@ type Request struct {
 	RecoveryID          string
 	AllowUnavailableAPI bool
 	Argo                *ArgoRequest
+	KubeletServingTLS   bool
 }
 
 type Runner func(context.Context, Request) error
@@ -49,6 +50,7 @@ type Options struct {
 	Approval           string
 	Check              bool
 	RecoverCredentials bool
+	KubeletServingTLS  bool
 	Runner             Runner
 	Doctor             func(bootstrapdoctor.Options) doctor.Report
 	Preflight          Preflight
@@ -74,6 +76,9 @@ func Apply(ctx context.Context, options Options) (returnErr error) {
 	}
 	if options.Check {
 		return ErrCheckUnsupported
+	}
+	if options.KubeletServingTLS && options.RecoverCredentials {
+		return errors.New("serving TLS transition cannot be combined with credential recovery")
 	}
 	if options.ConfigPath == "" {
 		options.ConfigPath = "bareplane.yaml"
@@ -164,6 +169,9 @@ func Apply(ctx context.Context, options Options) (returnErr error) {
 		return err
 	}
 	start := state.Completed
+	if options.KubeletServingTLS && (!exists || state.Completed != len(phases) || (state.Active != "" && state.Active != "health")) {
+		return errors.New("serving TLS requires an already completed matching Kubernetes bootstrap; it cannot replay cluster formation")
+	}
 	if options.RecoverCredentials {
 		if !exists || state.Completed < 6 {
 			return errors.New("kubeconfig recovery requires recorded complete node formation")
@@ -213,7 +221,8 @@ func Apply(ctx context.Context, options Options) (returnErr error) {
 		if !safeControllerPath(key) {
 			return errors.New("private-key path contains an unsupported OpenSSH expansion")
 		}
-		request := Request{Phase: phase, BundleDir: bundle, StateDir: stateDir, PrivateKeyFile: key, KnownHostsFile: knownHosts}
+		request := Request{Phase: phase, BundleDir: bundle, StateDir: stateDir, PrivateKeyFile: key, KnownHostsFile: knownHosts,
+			KubeletServingTLS: options.KubeletServingTLS}
 		if realRunner {
 			if err := validateControllerTools(ctx, request, current.Spec.Kubernetes.Version, options.LookPath); err != nil {
 				return err

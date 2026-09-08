@@ -142,7 +142,7 @@ func HandoffGitOps(ctx context.Context, options Options) error {
 }
 
 func runGitOps(ctx context.Context, options Options, handoff bool) (returnErr error) {
-	if ctx == nil || options.Check || options.RecoverCredentials {
+	if ctx == nil || options.Check || options.RecoverCredentials || options.KubeletServingTLS {
 		return errors.New("Argo installation requires a real operation context; check mode and credential recovery are unsupported")
 	}
 	if options.ConfigPath == "" {

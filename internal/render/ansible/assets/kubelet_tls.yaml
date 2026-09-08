@@ -1,0 +1,34 @@
+---
+- name: Verify existing Kubernetes ownership before serving-TLS maintenance
+  hosts: "control_plane[0]"
+  gather_facts: false
+  any_errors_fatal: true
+  roles:
+    - role: contract
+      tags: [always]
+    - role: join_primary
+    - role: join_topology
+  tasks:
+    - name: Require explicit maintenance approval before modifying any node
+      ansible.builtin.assert:
+        that:
+          - bareplane_kubelet_tls_approved | default(false) | bool
+          - not ansible_check_mode
+        quiet: true
+        fail_msg: Use bareplane bootstrap kubelet-tls with exact cluster approval.
+
+- name: Maintain one owned kubelet serving identity at a time
+  hosts: control_plane:workers
+  serial: 1
+  gather_facts: false
+  any_errors_fatal: true
+  roles:
+    - role: kubelet_tls
+
+- name: Verify the complete topology after serving-TLS maintenance
+  hosts: "control_plane[0]"
+  gather_facts: false
+  any_errors_fatal: true
+  roles:
+    - role: join_primary
+    - role: join_topology
