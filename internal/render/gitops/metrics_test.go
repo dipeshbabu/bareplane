@@ -62,7 +62,7 @@ func TestMetricsAssetHasVerifiedTLSAndNoEmbeddedSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
-	if got := fmt.Sprintf("%x", sha256.Sum256(data)); got != "bd21428c6a8f1d7d12c9f7e1a3c4c10d4a3dcacb4d7f0f4da5933701fdd2b5a0" {
+	if got := fmt.Sprintf("%x", sha256.Sum256(data)); got != "287379710a90bfb83125754b9b036fb128840820fa8486ec507b20937f6e048d" {
 		t.Fatalf("unreviewed Metrics Server asset: %s", got)
 	}
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
@@ -106,7 +106,10 @@ func TestMetricsAssetHasVerifiedTLSAndNoEmbeddedSecrets(t *testing.T) {
 			}
 		case "APIService":
 			apiService = true
-			if obj["spec"].(map[string]any)["insecureSkipTLSVerify"] != false || metadata["annotations"].(map[string]any)["cert-manager.io/inject-ca-from"] != "metrics-server/metrics-server-serving" {
+			if _, present := obj["spec"].(map[string]any)["insecureSkipTLSVerify"]; present {
+				t.Fatal("APIService must use its secure default without omitempty drift")
+			}
+			if metadata["annotations"].(map[string]any)["cert-manager.io/inject-ca-from"] != "metrics-server/metrics-server-serving" {
 				t.Fatal("aggregation TLS trust is not configured")
 			}
 		case "Certificate":

@@ -253,7 +253,6 @@ metadata:
 spec:
   group: metrics.k8s.io
   groupPriorityMinimum: 100
-  insecureSkipTLSVerify: false
   service:
     name: metrics-server
     namespace: metrics-server

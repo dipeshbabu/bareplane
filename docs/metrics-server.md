@@ -31,8 +31,10 @@ kubelet by disabling TLS verification.
 
 Only `InternalIP` is selected for node scraping. The component loads the cluster
 CA from its projected service-account volume and never sets
-`--kubelet-insecure-tls`. The APIService explicitly keeps TLS verification enabled;
-cert-manager injects its trust bundle. A namespaced SelfSigned Issuer and
+`--kubelet-insecure-tls`. The APIService uses its secure default:
+`insecureSkipTLSVerify` is omitted (false), and cert-manager injects its trust
+bundle. This avoids drift from Kubernetes omitting a false value in API responses.
+The field is never ignored, so an insecure override remains visible. A namespaced SelfSigned Issuer and
 server-only Certificate follow the upstream chart's
 [cert-manager integration](https://github.com/kubernetes-sigs/metrics-server/blob/v0.9.0/charts/metrics-server/templates/certificate.yaml),
 without granting client-authentication usage. The serving identity is restricted

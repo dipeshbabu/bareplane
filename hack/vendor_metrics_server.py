@@ -41,7 +41,11 @@ def curate(data):
             container['volumeMounts'].append(dict(name='serving-tls', mountPath='/etc/metrics-server/tls', readOnly=True))
             pod['volumes'].append(dict(name='serving-tls', secret=dict(secretName='metrics-server-serving', defaultMode=288)))
         if obj['kind'] == 'APIService':
-            obj['spec']['insecureSkipTLSVerify'] = False
+            # APIService's false bool is omitted by Kubernetes and this type is
+            # outside Argo's native normalization scheme. Use the secure default
+            # instead of generating a permanent false-versus-absent difference.
+            # Never ignore this field: a true override must remain visible.
+            obj['spec'].pop('insecureSkipTLSVerify')
             obj['spec']['service']['namespace'] = NAMESPACE
             metadata.setdefault('annotations', {}).update({'cert-manager.io/inject-ca-from': NAMESPACE + '/metrics-server-serving',
                                                            'argocd.argoproj.io/sync-wave': '10'})
