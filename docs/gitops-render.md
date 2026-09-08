@@ -14,6 +14,10 @@ Selection and ordering now come from the [component dependency registry](platfor
 component. It uses the same registry and export contract, without changing the
 minimal bootstrap/Argo fixture or enabling public DNS/ingress.
 
+[Metrics Server](metrics-server.md) is opt-in and uses verified TLS to both its
+kubelets and the aggregation API. Its rendered resource requests scale within
+the upstream node envelope; bootstrap PKI is never emitted as an Argo component.
+
 ## Review and publish
 
 The export contains the root Application under `bootstrap/`, child Applications under the configured repository `rootPath`, a pinned Argo component under `components/argocd/`, and a minimal profile description. The remote root must not overlap `bootstrap`, `components`, `profiles`, or `readme.md`. All source references point at the configured repository and explicit revision. Root and child Application names are stable, including for maximum-length cluster names.

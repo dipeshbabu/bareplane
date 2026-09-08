@@ -159,6 +159,7 @@ func (c Config) Validate() error {
 	problems = append(problems, validateOptionalGitOps(c.Spec.GitOps)...)
 	problems = append(problems, c.validateComponents()...)
 	problems = append(problems, validateCertificates(c.Spec.Certificates)...)
+	problems = append(problems, c.validateMetricsSizing()...)
 
 	if len(c.Spec.Nodes) == 0 {
 		problems = append(problems, "spec.nodes must contain at least one node group")

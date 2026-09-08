@@ -339,6 +339,21 @@ def verify_new_component_absence(client, resources):
                     'An existing unmanaged platform resource blocks initial handoff: ' + kind + '/' + metadata['name'])
         else:
             namespace = metadata.get('namespace')
+            # The aggregation layer publishes public client-CA/header settings
+            # in kube-system. Grant only the existing namespace-scoped reader
+            # Role to this new ServiceAccount; never adopt or modify that Role,
+            # ConfigMap, namespace, or a pre-existing binding.
+            authentication_reader = (
+                obj['apiVersion'] == 'rbac.authorization.k8s.io/v1' and kind == 'RoleBinding'
+                and namespace == 'kube-system' and metadata['name'] == 'metrics-server-auth-reader'
+                and metadata.get('annotations', {}).get('bareplane.io/component') == 'metrics-server'
+                and 'metrics-server' in namespaces
+                and obj.get('roleRef') == dict(apiGroup='rbac.authorization.k8s.io', kind='Role', name='extension-apiserver-authentication-reader')
+                and obj.get('subjects') == [dict(kind='ServiceAccount', name='metrics-server', namespace='metrics-server')])
+            if authentication_reader:
+                require(not client.json('get', 'rolebindings.rbac.authorization.k8s.io', metadata['name'], '-n', namespace,
+                                        '--ignore-not-found', '-o', 'json'), 'An existing metrics authentication binding blocks initial handoff')
+                continue
             group, _, version = obj['apiVersion'].rpartition('/')
             if not group:
                 version = obj['apiVersion']

@@ -23,13 +23,13 @@ jobs:
         run: python .github/scripts/ci_acceptance_gate.py
 
   join-topology:
-    name: "${{ matrix.mode == 'kubelet-tls' && 'Kubelet serving TLS VMs' || matrix.mode == 'cert-manager' && 'Core cert-manager VM' || matrix.mode == 'handoff' && 'GitOps handoff VM' || matrix.mode == 'argocd' && 'Argo installation VM' || matrix.mode == 'recovery' && 'Bootstrap recovery VM' || matrix.mode == 'apply' && 'Bootstrap apply VMs' || 'Multi-node join VMs' }}"
+    name: "${{ matrix.mode == 'metrics-server' && 'Core Metrics Server VM' || matrix.mode == 'kubelet-tls' && 'Kubelet serving TLS VMs' || matrix.mode == 'cert-manager' && 'Core cert-manager VM' || matrix.mode == 'handoff' && 'GitOps handoff VM' || matrix.mode == 'argocd' && 'Argo installation VM' || matrix.mode == 'recovery' && 'Bootstrap recovery VM' || matrix.mode == 'apply' && 'Bootstrap apply VMs' || 'Multi-node join VMs' }}"
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        mode: [phases, apply, recovery, argocd, handoff, cert-manager, kubelet-tls]
+        mode: [phases, apply, recovery, argocd, handoff, cert-manager, kubelet-tls, metrics-server]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -60,6 +60,7 @@ jobs:
           BAREPLANE_TEST_GITOPS_HANDOFF: "${{ matrix.mode == 'handoff' && '1' || '0' }}"
           BAREPLANE_TEST_CERT_MANAGER: "${{ matrix.mode == 'cert-manager' && '1' || '0' }}"
           BAREPLANE_TEST_KUBELET_TLS: "${{ matrix.mode == 'kubelet-tls' && '1' || '0' }}"
+          BAREPLANE_TEST_METRICS_SERVER: "${{ matrix.mode == 'metrics-server' && '1' || '0' }}"
           BAREPLANE_TEST_GIT_REF: "${{ github.event.pull_request.head.sha || github.sha }}"
           BAREPLANE_TEST_GIT_REPO: "${{ github.event.pull_request.head.repo.clone_url || format('{0}/{1}.git', github.server_url, github.repository) }}"
         run: python tests/ansible/join_topology_vm.py

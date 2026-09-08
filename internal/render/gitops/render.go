@@ -71,6 +71,11 @@ func Render(cfg config.Config) (map[string][]byte, error) {
 				return nil, err
 			}
 		}
+		if component.ID == "metrics-server" {
+			if err := renderMetricsResources(cfg, files); err != nil {
+				return nil, err
+			}
+		}
 	}
 	resources := make([]string, 0, len(components))
 	componentNames := make([]string, 0, len(components))
@@ -158,6 +163,13 @@ func application(cfg config.Config, component, sourcePath, wave string, namespac
 		result["spec"].(map[string]any)["ignoreDifferences"] = []map[string]any{
 			{"group": "admissionregistration.k8s.io", "kind": "MutatingWebhookConfiguration", "name": "cert-manager-webhook", "jqPathExpressions": []string{".webhooks[].clientConfig.caBundle"}},
 			{"group": "admissionregistration.k8s.io", "kind": "ValidatingWebhookConfiguration", "name": "cert-manager-webhook", "jqPathExpressions": []string{".webhooks[].clientConfig.caBundle"}},
+		}
+		policy := result["spec"].(map[string]any)["syncPolicy"].(map[string]any)
+		policy["syncOptions"] = append(policy["syncOptions"].([]string), "RespectIgnoreDifferences=true")
+	}
+	if component == "metrics-server" {
+		result["spec"].(map[string]any)["ignoreDifferences"] = []map[string]any{
+			{"group": "apiregistration.k8s.io", "kind": "APIService", "name": "v1beta1.metrics.k8s.io", "jsonPointers": []string{"/spec/caBundle"}},
 		}
 		policy := result["spec"].(map[string]any)["syncPolicy"].(map[string]any)
 		policy["syncOptions"] = append(policy["syncOptions"].([]string), "RespectIgnoreDifferences=true")
