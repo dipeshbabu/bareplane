@@ -26,6 +26,11 @@ Copy the reviewed payload to a **separate checkout** of your repository. Exclude
 
 Identical input produces byte-identical output, including the ownership inventory. Re-rendering accepts only an intact Bareplane export for the same cluster. It verifies every file digest and refuses user edits, missing/extra files, extra directories (including a Git checkout), symlinks/special files, malformed markers, and redirected ancestors. A valid unedited export can be replaced after changing configuration or the renderer; stale generated files are removed as part of the staged replacement. To preserve edits, move/copy them into the user checkout before re-rendering. There is no automatic merge of user edits and no silent overwrite fallback.
 
+Cluster identifiers remain YAML strings even when a valid label resembles a
+boolean, number, or date (for example `false`, `123`, or `2026-01-01`). Ordinary
+identifiers retain their existing bytes; quoting does not change safe-name
+installation or handoff contracts.
+
 The bootstrap operation lock serializes export generation with bootstrap and handoff preparation. Persistent execution state and private credentials remain outside the export. No generic configuration serialization is used: only reviewed public GitOps fields and the cluster name are emitted.
 
 ## Minimal Argo payload

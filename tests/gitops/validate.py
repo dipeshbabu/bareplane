@@ -171,6 +171,9 @@ def main():
         metrics_root = root / 'metrics-server'
         metrics_root.mkdir()
         metrics_config = copy.deepcopy(component_config)
+        # A valid DNS label can be a YAML boolean. Exercise the public renderer
+        # and real Kustomize/schema path with an ambiguous cluster identifier.
+        metrics_config['metadata']['name'] = 'false'
         metrics_config['spec']['components']['disabled'].remove('metrics-server')
         metrics_config['spec']['components']['enabled'] = ['metrics-server']
         metrics_path = metrics_root / 'bareplane.yaml'
