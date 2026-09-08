@@ -73,6 +73,26 @@ class NewComponentOwnershipTests(unittest.TestCase):
             with self.subTest(resource=resource), self.assertRaises(git.GitOpsError):
                 handoff.verify_new_component_absence(self, self.resources + [resource])
 
+    def test_metrics_authentication_reader_is_a_new_exact_namespace_scoped_binding(self):
+        resources = list(yaml.safe_load_all((ROOT / 'internal/render/gitops/assets/metrics-server/upstream.yaml').read_bytes()))
+        handoff.verify_new_component_absence(self, resources)
+        query = ('get', 'rolebindings.rbac.authorization.k8s.io', 'metrics-server-auth-reader', '-n', 'kube-system', '--ignore-not-found', '-o', 'json')
+        self.assertIn(query, self.observed)
+        self.existing = ('rolebindings.rbac.authorization.k8s.io', 'metrics-server-auth-reader')
+        with self.assertRaises(git.GitOpsError):
+            handoff.verify_new_component_absence(self, resources)
+        self.existing = None
+        for mutation in [lambda r: r['roleRef'].update(name='cluster-admin'),
+                         lambda r: r['roleRef'].update(kind='ClusterRole'),
+                         lambda r: r['subjects'][0].update(namespace='argocd'),
+                         lambda r: r['metadata'].update(name='other'),
+                         lambda r: r.update(apiVersion='foreign.io/v1')]:
+            changed = copy.deepcopy(resources)
+            binding = next(obj for obj in changed if obj['kind'] == 'RoleBinding')
+            mutation(binding)
+            with self.assertRaises(git.GitOpsError):
+                handoff.verify_new_component_absence(self, changed)
+
 
 class HandoffPlanTests(unittest.TestCase):
     @classmethod

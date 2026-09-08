@@ -21,6 +21,10 @@ SOPS remains an extension boundary until its actual integration is configured an
 cert-manager is now available explicitly via `enabled: [cert-manager]` or the
 [`spec.certificates` issuer contract](certificates.md); it is not yet a default.
 
+[Metrics Server](metrics-server.md) is also explicit, with cert-manager and
+bootstrap-owned verified kubelet serving TLS as required dependencies. Its
+5,000-node sizing limit is validated only when it is selected.
+
 ## Stable acceptance baseline
 
 The public M1/M2 fixture, reference Proxmox acceptance config, and schema/disposable-VM tests explicitly disable optional M3 defaults. This preserves the verified bootstrap/Argo baseline while core capabilities grow. The published Kubernetes payload remains byte-identical; these are configuration selections, not duplicate platform trees.

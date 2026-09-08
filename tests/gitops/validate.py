@@ -168,6 +168,22 @@ def main():
                     key = (definition['spec']['group'] + '/' + version['name'], definition['spec']['names']['kind'])
                     custom_validators[key] = jsonschema.Draft4Validator(strict_schema(copy.deepcopy(version['schema']['openAPIV3Schema'])))
         custom_resources = [obj for obj in component_docs if obj['apiVersion'] == 'cert-manager.io/v1'] + certificate_resources()
+        metrics_root = root / 'metrics-server'
+        metrics_root.mkdir()
+        metrics_config = copy.deepcopy(component_config)
+        metrics_config['spec']['components']['disabled'].remove('metrics-server')
+        metrics_config['spec']['components']['enabled'] = ['metrics-server']
+        metrics_path = metrics_root / 'bareplane.yaml'
+        metrics_path.write_text(yaml.safe_dump(metrics_config), encoding='utf-8')
+        run([bareplane, 'gitops', 'render', str(metrics_path)])
+        metrics_export = metrics_root / 'gitops'
+        metrics_docs = list(yaml.safe_load_all(run([kubectl, 'kustomize', str(metrics_export / 'components/metrics-server')])))
+        metrics_apps = list(yaml.safe_load_all(run([kubectl, 'kustomize', str(metrics_export / 'clusters/gitops-ci')])))
+        for app in metrics_apps:
+            validator.validate(app)
+        applications += metrics_apps
+        custom_resources += [obj for obj in metrics_docs if obj['apiVersion'] == 'cert-manager.io/v1']
+        documents += [obj for obj in metrics_docs if obj['apiVersion'] != 'cert-manager.io/v1']
         for obj in custom_resources:
             custom = custom_validators[obj['apiVersion'], obj['kind']]
             custom.validate(obj)

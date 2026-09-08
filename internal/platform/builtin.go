@@ -5,6 +5,8 @@ func Builtin() (*Registry, error) {
 		{ID: "cilium", Owner: Bootstrap, Status: Implemented, DefaultEnabled: true, BaseWave: -50},
 		{ID: "argocd", Dependencies: []string{"cilium"}, Owner: GitOps, Status: Implemented, DefaultEnabled: true, Profiles: []string{"minimal"}, BaseWave: -30},
 		{ID: "cert-manager", Dependencies: []string{"argocd"}, Owner: GitOps, Status: Implemented, Namespace: "cert-manager", BaseWave: -20},
+		{ID: "kubelet-serving-tls", Dependencies: []string{"cilium"}, Owner: Bootstrap, Status: Implemented, BaseWave: -40},
+		{ID: "metrics-server", Dependencies: []string{"argocd", "cert-manager", "kubelet-serving-tls"}, Owner: GitOps, Status: Implemented, Namespace: "metrics-server", BaseWave: -10},
 		{ID: "gpu-passthrough", Owner: Infrastructure, Status: Unavailable, BaseWave: -60},
 		{ID: "gpu-drivers", Dependencies: []string{"gpu-passthrough"}, Owner: Bootstrap, Status: Unavailable, BaseWave: -50},
 		{ID: "node-feature-discovery", Dependencies: []string{"argocd"}, Owner: GitOps, Status: Unavailable, BaseWave: -20},
@@ -26,7 +28,7 @@ func Builtin() (*Registry, error) {
 		{ID: "redis", Dependencies: []string{"storage", "data-recovery"}, Owner: GitOps, Status: Unavailable, BaseWave: -9},
 		{ID: "superset", Dependencies: []string{"postgres", "trino"}, Owner: GitOps, Status: Unavailable, BaseWave: 1},
 	}
-	for _, id := range []string{"metrics-server", "external-dns", "observability", "secrets-sops", "vault"} {
+	for _, id := range []string{"external-dns", "observability", "secrets-sops", "vault"} {
 		component := Component{ID: id, Dependencies: []string{"argocd"}, Owner: GitOps, Status: Unavailable, BaseWave: -20}
 		if id == "secrets-sops" {
 			component.Conflicts = []string{"vault"}

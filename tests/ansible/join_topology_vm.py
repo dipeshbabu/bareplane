@@ -16,6 +16,7 @@ import time
 import yaml
 
 from cert_manager_acceptance import run_cert_manager_acceptance
+from metrics_server_acceptance import run_metrics_server_acceptance
 
 
 IMAGE_URL = 'https://cloud-images.ubuntu.com/noble/20260826/noble-server-cloudimg-amd64.img'
@@ -66,7 +67,8 @@ def main():
     apply_mode = os.environ.get('BAREPLANE_TEST_BOOTSTRAP_APPLY') == '1'
     recovery_mode = os.environ.get('BAREPLANE_TEST_BOOTSTRAP_RECOVERY') == '1'
     kubelet_tls_mode = os.environ.get('BAREPLANE_TEST_KUBELET_TLS') == '1'
-    cert_manager_mode = os.environ.get('BAREPLANE_TEST_CERT_MANAGER') == '1'
+    metrics_mode = os.environ.get('BAREPLANE_TEST_METRICS_SERVER') == '1'
+    cert_manager_mode = os.environ.get('BAREPLANE_TEST_CERT_MANAGER') == '1' or metrics_mode
     handoff_mode = os.environ.get('BAREPLANE_TEST_GITOPS_HANDOFF') == '1' or cert_manager_mode
     argocd_mode = os.environ.get('BAREPLANE_TEST_ARGOCD_INSTALL') == '1' or handoff_mode
     single_mode = recovery_mode or argocd_mode
@@ -229,6 +231,8 @@ def main():
                     raise RuntimeError('A healthy CLI rerun reconfigured completed phases')
                 if (trust / '.operation.lock').exists():
                     raise RuntimeError('Successful apply did not release its operation lock')
+                if metrics_mode:
+                    run([REPO / 'bin/bareplane', 'bootstrap', 'kubelet-tls', '--approve', 'lab', config_path])
                 if kubelet_tls_mode:
                     # All four real nodes cover the primary, joined control
                     # planes and worker ownership contracts independently.
@@ -355,6 +359,8 @@ def main():
                         print('Root handoff verified pinned snapshot then following Git; Argo self-management and read-only rerun passed.', flush=True)
                         if cert_manager_mode:
                             run_cert_manager_acceptance(kubectl, REPO, work)
+                        if metrics_mode:
+                            run_metrics_server_acceptance(kubectl, REPO, work, names)
                 if recovery_mode:
                     run([REPO / 'bin/bareplane', 'bootstrap', 'kubelet-tls', '--approve', 'lab', config_path])
                     run([REPO / 'bin/bareplane', 'bootstrap', 'diagnose', config_path])
