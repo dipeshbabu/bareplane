@@ -43,6 +43,14 @@ func Render(cfg config.Config) (map[string][]byte, error) {
 	if err := resolved.RequireAvailable(false); err != nil {
 		return nil, err
 	}
+	// DNS labels can still be YAML booleans, numbers or timestamps. Marshal the
+	// validated identifier as a string scalar; ordinary names keep their exact
+	// existing bytes while ambiguous names receive the required quoting.
+	clusterYAML, err := yaml.Marshal(cfg.Metadata.Name)
+	if err != nil {
+		return nil, fmt.Errorf("encode cluster identifier: %w", err)
+	}
+	clusterScalar := strings.TrimSuffix(string(clusterYAML), "\n")
 	components := resolved.GitOpsComponents()
 	root := cfg.Spec.GitOps.RootPath
 	switch strings.Split(root, "/")[0] {
@@ -59,8 +67,9 @@ func Render(cfg config.Config) (map[string][]byte, error) {
 			if err != nil {
 				return err
 			}
-			// Inputs are validated DNS labels, not arbitrary YAML fragments.
-			data = []byte(strings.ReplaceAll(strings.ReplaceAll(string(data), "\r\n", "\n"), "BAREPLANE_CLUSTER_NAME", cfg.Metadata.Name))
+			// Asset placeholders are standalone annotation scalars, not embedded
+			// inside scripts or already-quoted values (covered by an invariant test).
+			data = []byte(strings.ReplaceAll(strings.ReplaceAll(string(data), "\r\n", "\n"), "BAREPLANE_CLUSTER_NAME", clusterScalar))
 			files["components/"+strings.TrimPrefix(name, "assets/")] = data
 			return nil
 		}); err != nil {
