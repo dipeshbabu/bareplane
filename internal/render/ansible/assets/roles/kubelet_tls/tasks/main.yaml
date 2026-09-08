@@ -53,7 +53,7 @@
     primary: "{{ inventory_hostname == bareplane_primary_control_plane }}"
     vip: "{{ bareplane_api_vip }}"
     original: "{{ bareplane_tls_inspection.configuration }}"
-    target: "{{ bareplane_tls_plan.target }}"
+    target_hex: "{{ bareplane_tls_plan.target_hex }}"
   no_log: true
 
 - name: Approve only the inventory-bound request and verify real serving TLS

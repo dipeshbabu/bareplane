@@ -22,9 +22,13 @@ STATE = Path(owned.STATE)
 LIMIT = 65536
 
 
+class NodeTLSRefusal(ValueError):
+    """Only fixed, non-sensitive policy messages may reach user diagnostics."""
+
+
 def require(condition, message):
     if not condition:
-        raise ValueError(message)
+        raise NodeTLSRefusal(message)
 
 
 def fingerprint(data):
@@ -168,7 +172,7 @@ def main():
         operation=dict(type='str', choices=['inspect', 'configure'], required=True),
         approved=dict(type='bool', default=False), identity=dict(type='dict', required=True), node=dict(type='dict', required=True),
         primary=dict(type='bool', default=False), vip=dict(type='str', required=True),
-        original=dict(type='str', no_log=True), target=dict(type='str', no_log=True),
+        original=dict(type='str', no_log=True), target_hex=dict(type='str', no_log=True),
     ), supports_check_mode=True)
 
     def interrupted(signum, frame):
@@ -190,11 +194,20 @@ def main():
         with os.fdopen(descriptor, 'rb') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             _, record = inspect(p['identity'], p['node'], p['primary'], p['vip'])
-            original, target = base64.b64decode(p['original'], validate=True), base64.b64decode(p['target'], validate=True)
+            require(len(p['original']) <= 90000 and len(p['target_hex']) <= LIMIT * 2, 'Serving-TLS transfer exceeds its bounded size')
+            original, target = base64.b64decode(p['original'], validate=True), bytes.fromhex(p['target_hex'])
             changed = configure(original, target, record, p['identity'])
         module.exit_json(changed=changed, configured=True)
-    except (ValueError, KeyError, TypeError, AttributeError, OSError, subprocess.SubprocessError):
-        module.fail_json(msg='Cannot safely prove or transition owned kubelet serving TLS; private backup and intent were retained for approved retry')
+    except NodeTLSRefusal as error:
+        module.fail_json(msg=str(error) + '; private backup and intent were retained for approved retry')
+    except (ValueError, KeyError, TypeError, AttributeError, OSError, subprocess.SubprocessError) as error:
+        # Report code location and exception category only, never exception text,
+        # command output, YAML, key paths, or configuration values.
+        trace = error.__traceback__
+        while trace.tb_next is not None:
+            trace = trace.tb_next
+        location = trace.tb_frame.f_code.co_name + ':' + str(trace.tb_lineno)
+        module.fail_json(msg='Cannot safely prove or transition owned kubelet serving TLS (' + type(error).__name__ + ' at ' + location + '); private backup and intent were retained for approved retry')
 
 
 if __name__ == '__main__':

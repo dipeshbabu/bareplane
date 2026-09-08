@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from cryptography.hazmat.primitives.asymmetric import ec
 import test_kubelet_tls_policy as fixtures
+import test_kubelet_tls_config as config_fixtures
 
 
 ROOT = Path(__file__).resolve().parents[2] / 'internal/render/ansible/assets'
@@ -42,6 +43,19 @@ class Record:
 
 
 class ApprovalTests(unittest.TestCase):
+    def test_opaque_plan_survives_ansible_no_log_output_redaction(self):
+        from ansible.module_utils.common.parameters import remove_values
+
+        raw = config_fixtures.VALID
+        while len(raw) % 3:
+            raw += b'# padding\n'
+        encoded = base64.b64encode(raw).decode()
+        previous = base64.b64encode(approval.enable_serving_bootstrap(raw)).decode()
+        self.assertNotEqual(remove_values({'target': previous}, {encoded})['target'], previous)
+        planned = approval.plan_configuration(encoded)
+        self.assertEqual(remove_values(planned, {encoded}), planned)
+        self.assertEqual(bytes.fromhex(planned['target_hex']), approval.enable_serving_bootstrap(raw))
+
     def setUp(self):
         self.fixture = fixtures.ServingPolicyTests()
         self.fixture.key = ec.generate_private_key(ec.SECP256R1())

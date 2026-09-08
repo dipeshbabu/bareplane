@@ -24,6 +24,17 @@ def require(condition, message):
         raise ValueError(message)
 
 
+def plan_configuration(encoded):
+    require(hasattr(policy.x509.CertificateSigningRequest, 'attributes'), 'Controller cryptography 36 or newer is required before node changes')
+    require(encoded and len(encoded) <= 90000, 'Invalid bounded kubelet configuration')
+    target = enable_serving_bootstrap(base64.b64decode(encoded, validate=True))
+    # Ansible redacts occurrences of no_log argument values in module output.
+    # When a YAML flag is appended, its base64 can contain the complete original
+    # base64 value as a prefix. A distinct encoding preserves the opaque result
+    # without weakening input redaction or publishing configuration bytes.
+    return {'target_hex': target.hex()}
+
+
 class Approval:
     def __init__(self, commands, kubeconfig, record, ca, credential_id=None):
         self.commands, self.kubeconfig, self.record, self.ca = commands, str(kubeconfig), record, ca
@@ -145,10 +156,7 @@ def main():
     try:
         p = module.params
         if p['operation'] == 'plan':
-            require(hasattr(policy.x509.CertificateSigningRequest, 'attributes'), 'Controller cryptography 36 or newer is required before node changes')
-            require(p['configuration'] and len(p['configuration']) <= 90000, 'Invalid bounded kubelet configuration')
-            target = enable_serving_bootstrap(base64.b64decode(p['configuration'], validate=True))
-            module.exit_json(changed=False, target=base64.b64encode(target).decode())
+            module.exit_json(changed=False, **plan_configuration(p['configuration']))
         require(p['approved'] and not module.check_mode, 'Serving CSR approval requires explicit maintenance approval')
         identity = p['identity']
         require(set(identity) == {'cluster', 'node', 'nodeUID', 'address', 'caSHA256', 'machineID', 'credentialID'}
