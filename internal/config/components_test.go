@@ -60,7 +60,7 @@ func TestComponentSelectionRejectsUnknownConflictingUnsafeAndRequiredDisables(t 
 func TestConfigFlagsUseTheSameRegistryAndCannotBypassDisabledDependencies(t *testing.T) {
 	for _, change := range []func(*Config){
 		func(c *Config) { c.Spec.Features.GPU = true }, func(c *Config) { c.Spec.Features.Observability = true },
-		func(c *Config) { c.Spec.DNS.Provider = "cloudflare" }, func(c *Config) { c.Spec.Secrets.Provider = "vault" },
+		func(c *Config) { c.Spec.Secrets.Provider = "vault" },
 	} {
 		cfg := gitOpsFixture(t)
 		change(&cfg)

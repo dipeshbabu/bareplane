@@ -1,0 +1,41 @@
+apiVersion: bareplane.io/v1alpha1
+kind: BareplaneCluster
+metadata:
+  name: lab
+spec:
+  domain: lab.example.com
+  provider:
+    type: proxmox
+    endpoint: https://proxmox.example.invalid:8006
+  nodes:
+    - name: control
+      role: control-plane
+      count: 1
+      cpu: 2
+      memoryGB: 4
+      diskGB: 24
+  gitops:
+    repoURL: https://github.com/dipeshbabu/bareplane.git
+    revision: main
+    rootPath: examples/gitops/external-dns-root
+  components:
+    enabled: [external-dns]
+    disabled: [metrics-server, cert-manager, observability, storage, secrets-sops, vault]
+  features:
+    observability: false
+    gpu: false
+  profiles: [minimal]
+  dns:
+    provider: cloudflare
+    automation:
+      zoneID: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      zoneName: example.test
+      domain: apps.example.test
+      sourceNamespace: dns-workloads
+      ownerID: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+      mode: dry-run
+      tokenSecret:
+        name: cloudflare-api
+        key: apiToken
+  secrets:
+    provider: sops

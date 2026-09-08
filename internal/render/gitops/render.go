@@ -85,6 +85,11 @@ func Render(cfg config.Config) (map[string][]byte, error) {
 				return nil, err
 			}
 		}
+		if component.ID == "external-dns" {
+			if err := renderDNS(cfg, files); err != nil {
+				return nil, err
+			}
+		}
 	}
 	resources := make([]string, 0, len(components))
 	componentNames := make([]string, 0, len(components))

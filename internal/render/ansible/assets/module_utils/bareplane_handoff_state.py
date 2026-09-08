@@ -332,6 +332,13 @@ def verify_new_component_absence(client, resources):
                      'MutatingWebhookConfiguration', 'ValidatingWebhookConfiguration', 'APIService'}
     declared_custom = {(obj['spec']['group'], version['name'], obj['spec']['names']['kind']): obj['spec']['scope']
                        for obj in resources if obj['kind'] == 'CustomResourceDefinition' for version in obj['spec']['versions']}
+    dns_sources = []
+    for obj in resources:
+        if obj['kind'] == 'Deployment' and obj['metadata']['name'] == 'external-dns' and obj['metadata'].get('namespace') == 'external-dns':
+            for container in obj['spec']['template']['spec']['containers']:
+                if container['name'] == 'external-dns':
+                    dns_sources += [arg.removeprefix('--namespace=') for arg in container.get('args', []) if arg.startswith('--namespace=')]
+    verified_source_namespaces = set()
     for obj in resources:
         kind, metadata = obj['kind'], obj['metadata']
         if kind in cluster_kinds:
@@ -339,6 +346,27 @@ def verify_new_component_absence(client, resources):
                     'An existing unmanaged platform resource blocks initial handoff: ' + kind + '/' + metadata['name'])
         else:
             namespace = metadata.get('namespace')
+            if metadata.get('annotations', {}).get('bareplane.io/component') == 'external-dns' and kind in {'Role', 'RoleBinding'}:
+                expected_rules = [dict(apiGroups=[''], resources=['services'], verbs=['get', 'list', 'watch'])]
+                expected_role = dict(apiGroup='rbac.authorization.k8s.io', kind='Role', name='bareplane-external-dns-reader')
+                expected_subject = [dict(kind='ServiceAccount', name='external-dns', namespace='external-dns')]
+                require(obj['apiVersion'] == 'rbac.authorization.k8s.io/v1' and 'external-dns' in namespaces
+                        and dns_sources == [namespace] and namespace not in namespaces
+                        and re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', namespace)
+                        and not namespace.startswith('kube-') and namespace != 'argocd'
+                        and metadata['name'] == 'bareplane-external-dns-reader'
+                        and metadata.get('annotations', {}).get('bareplane.io/existing-namespace') == namespace
+                        and ((kind == 'Role' and obj.get('rules') == expected_rules)
+                             or (kind == 'RoleBinding' and obj.get('roleRef') == expected_role and obj.get('subjects') == expected_subject)),
+                        'ExternalDNS may reference only its exact read-only Service role in the explicit application namespace')
+                if namespace not in verified_source_namespaces:
+                    current = client.json('get', 'namespace', namespace, '--ignore-not-found', '-o', 'json')
+                    require(current.get('metadata', {}).get('uid') and not current['metadata'].get('deletionTimestamp'),
+                            'The explicitly referenced DNS source namespace must already exist and not be terminating')
+                    verified_source_namespaces.add(namespace)
+                require(not client.json('get', kind.lower() + 's.rbac.authorization.k8s.io', metadata['name'], '-n', namespace,
+                                        '--ignore-not-found', '-o', 'json'), 'An existing application DNS reader role or binding blocks initial handoff')
+                continue
             # The aggregation layer publishes public client-CA/header settings
             # in kube-system. Grant only the existing namespace-scoped reader
             # Role to this new ServiceAccount; never adopt or modify that Role,
