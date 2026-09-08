@@ -10,6 +10,10 @@ Configure the [GitOps repository contract](gitops.md) first. For the initial ren
 
 Selection and ordering now come from the [component dependency registry](platform-graph.md). The renderer uses one asset directory per selected GitOps component, never a separate profile tree, and refuses unavailable dependencies before generating any output.
 
+[cert-manager and explicit issuers](certificates.md) are available as an opt-in
+component. It uses the same registry and export contract, without changing the
+minimal bootstrap/Argo fixture or enabling public DNS/ingress.
+
 ## Review and publish
 
 The export contains the root Application under `bootstrap/`, child Applications under the configured repository `rootPath`, a pinned Argo component under `components/argocd/`, and a minimal profile description. The remote root must not overlap `bootstrap`, `components`, `profiles`, or `readme.md`. All source references point at the configured repository and explicit revision. Root and child Application names are stable, including for maximum-length cluster names.

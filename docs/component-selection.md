@@ -18,6 +18,9 @@ Selection is distinct from availability. A well-formed request for a planned cap
 
 SOPS remains an extension boundary until its actual integration is configured and implemented. Vault is an explicit advanced provider choice. This block never carries plaintext keys, tokens, secret values, repository credentials, or ownership overrides.
 
+cert-manager is now available explicitly via `enabled: [cert-manager]` or the
+[`spec.certificates` issuer contract](certificates.md); it is not yet a default.
+
 ## Stable acceptance baseline
 
 The public M1/M2 fixture, reference Proxmox acceptance config, and schema/disposable-VM tests explicitly disable optional M3 defaults. This preserves the verified bootstrap/Argo baseline while core capabilities grow. The published Kubernetes payload remains byte-identical; these are configuration selections, not duplicate platform trees.

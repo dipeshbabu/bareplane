@@ -325,6 +325,28 @@ def verify_cilium_excluded(client, applications):
             require(not owned, 'An Argo Application claims bootstrap-owned Cilium resources')
 
 
+def verify_new_component_absence(client, resources):
+    """Cold handoff cannot adopt existing platform namespaces or cluster objects."""
+    namespaces = {obj['metadata']['name'] for obj in resources if obj['kind'] == 'Namespace'}
+    cluster_kinds = {'Namespace', 'CustomResourceDefinition', 'ClusterRole', 'ClusterRoleBinding',
+                     'MutatingWebhookConfiguration', 'ValidatingWebhookConfiguration', 'APIService'}
+    declared_custom = {(obj['spec']['group'], version['name'], obj['spec']['names']['kind']): obj['spec']['scope']
+                       for obj in resources if obj['kind'] == 'CustomResourceDefinition' for version in obj['spec']['versions']}
+    for obj in resources:
+        kind, metadata = obj['kind'], obj['metadata']
+        if kind in cluster_kinds:
+            require(not client.json('get', kind, metadata['name'], '--ignore-not-found', '-o', 'json'),
+                    'An existing unmanaged platform resource blocks initial handoff: ' + kind + '/' + metadata['name'])
+        else:
+            namespace = metadata.get('namespace')
+            group, _, version = obj['apiVersion'].rpartition('/')
+            if not group:
+                version = obj['apiVersion']
+            custom_scope = declared_custom.get((group, version, kind))
+            require(namespace in namespaces or (custom_scope == 'Cluster' and not namespace),
+                    'Platform resource is outside its declared new namespace or CRD contract')
+
+
 def wait_reconciliation(client, writer, plan, pinned):
     deadline = time.monotonic() + 600
     while True:

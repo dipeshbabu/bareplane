@@ -15,6 +15,8 @@ import time
 
 import yaml
 
+from cert_manager_acceptance import run_cert_manager_acceptance
+
 
 IMAGE_URL = 'https://cloud-images.ubuntu.com/noble/20260826/noble-server-cloudimg-amd64.img'
 IMAGE_SHA256 = 'd0fe84bb5f80853425fa6be28e2c106f30104c3cfe8611933f2e65c9b63f0e30'
@@ -63,7 +65,8 @@ def main():
     work = Path(tempfile.mkdtemp(prefix='bareplane-join-vm-'))
     apply_mode = os.environ.get('BAREPLANE_TEST_BOOTSTRAP_APPLY') == '1'
     recovery_mode = os.environ.get('BAREPLANE_TEST_BOOTSTRAP_RECOVERY') == '1'
-    handoff_mode = os.environ.get('BAREPLANE_TEST_GITOPS_HANDOFF') == '1'
+    cert_manager_mode = os.environ.get('BAREPLANE_TEST_CERT_MANAGER') == '1'
+    handoff_mode = os.environ.get('BAREPLANE_TEST_GITOPS_HANDOFF') == '1' or cert_manager_mode
     argocd_mode = os.environ.get('BAREPLANE_TEST_ARGOCD_INSTALL') == '1' or handoff_mode
     single_mode = recovery_mode or argocd_mode
     guests = []
@@ -324,6 +327,8 @@ def main():
                         if any(line not in status for line in ['kubernetes-ready: true', 'argocd-ready: true', 'gitops-handed-off: true']):
                             raise RuntimeError('Status did not distinguish verified lifecycle stages')
                         print('Root handoff verified pinned snapshot then following Git; Argo self-management and read-only rerun passed.', flush=True)
+                        if cert_manager_mode:
+                            run_cert_manager_acceptance(kubectl, REPO, work)
                 if recovery_mode:
                     run([REPO / 'bin/bareplane', 'bootstrap', 'diagnose', config_path])
                     (trust / 'admin.conf').unlink()

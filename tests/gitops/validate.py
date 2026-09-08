@@ -19,6 +19,9 @@ import jsonschema
 from lupa.lua51 import LuaRuntime
 import yaml
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'ansible'))
+from cert_manager_acceptance import certificate_resources
+
 
 SCHEMAS = "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/07b64c5376535fbbd6fb9910621e1a41f7613c14/{{.NormalizedKubernetesVersion}}-standalone{{.StrictSuffix}}/{{.ResourceKind}}{{.KindSuffix}}.json"
 CRD_OPENAPI = "https://raw.githubusercontent.com/kubernetes/kubernetes/v1.36.4/api/openapi-spec/v3/apis__apiextensions.k8s.io__v1_openapi.json"
@@ -139,6 +142,39 @@ def main():
         assert "resource.customizations.health.argoproj.io_Application" in configmap["data"]
         validate_child_health(configmap["data"]["resource.customizations.health.argoproj.io_Application"])
         assert configmap["data"]["application.resourceTrackingMethod"] == "annotation"
+        # Exercise the opt-in component through the public CLI, including the
+        # exact issuer/Certificate schemas used by disposable VM acceptance.
+        component_root = root / 'cert-manager'
+        component_root.mkdir()
+        component_config = yaml.safe_load(CONFIG)
+        component_config['spec']['components']['disabled'].remove('cert-manager')
+        component_config['spec']['certificates'] = {'issuers': [
+            {'name': 'lab-selfsigned', 'type': 'self-signed'},
+            {'name': 'lab-ca', 'type': 'ca', 'secretName': 'operator-ca'},
+        ]}
+        component_path = component_root / 'bareplane.yaml'
+        component_path.write_text(yaml.safe_dump(component_config), encoding='utf-8')
+        run([bareplane, 'gitops', 'render', str(component_path)])
+        component_export = component_root / 'gitops'
+        component_docs = list(yaml.safe_load_all(run([kubectl, 'kustomize', str(component_export / 'components/cert-manager')])))
+        component_apps = list(yaml.safe_load_all(run([kubectl, 'kustomize', str(component_export / 'clusters/gitops-ci')])))
+        for app in component_apps:
+            validator.validate(app)
+        applications += component_apps
+        custom_validators = {}
+        for definition in component_docs:
+            if definition['kind'] == 'CustomResourceDefinition':
+                for version in definition['spec']['versions']:
+                    key = (definition['spec']['group'] + '/' + version['name'], definition['spec']['names']['kind'])
+                    custom_validators[key] = jsonschema.Draft4Validator(strict_schema(copy.deepcopy(version['schema']['openAPIV3Schema'])))
+        custom_resources = [obj for obj in component_docs if obj['apiVersion'] == 'cert-manager.io/v1'] + certificate_resources()
+        for obj in custom_resources:
+            custom = custom_validators[obj['apiVersion'], obj['kind']]
+            custom.validate(obj)
+            invalid = copy.deepcopy(obj)
+            invalid['spec']['unexpectedField'] = 'reject'
+            assert not custom.is_valid(invalid), 'Certificate schema must reject unknown fields'
+        documents += [obj for obj in component_docs if obj['apiVersion'] != 'cert-manager.io/v1']
         for obj in documents:
             if obj["kind"] in {"Deployment", "StatefulSet"}:
                 assert obj["spec"]["template"]["spec"]["tolerations"] == [{"key": "node-role.kubernetes.io/control-plane", "operator": "Exists", "effect": "NoSchedule"}]
@@ -164,7 +200,7 @@ def main():
         assert summary["valid"] + len(definitions) == len(documents)
         run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests/ansible', '-p', 'test_handoff_state.py'],
             env=dict(os.environ, BAREPLANE_TEST_KUBECTL=kubectl))
-        print(f"Validated {len(documents)} Kubernetes resources and {len(applications)} strict Argo Applications; deterministic export, root commit pinning, and Kustomize patches passed")
+        print(f"Validated {len(documents)} Kubernetes resources, {len(applications)} strict Argo Applications, and {len(custom_resources)} certificate/issuer resources; deterministic export, root commit pinning, and Kustomize patches passed")
 
 
 if __name__ == "__main__":
