@@ -55,8 +55,52 @@ class ComponentAcceptance:
                 return current
             if time.monotonic() > deadline:
                 kinds = [condition.get('type') for condition in status.get('conditions', [])]
+                resources = [dict(kind=resource.get('kind'), name=resource.get('name'), namespace=resource.get('namespace'),
+                                  sync=resource.get('status'), health=resource.get('health', {}).get('status'))
+                             for resource in status.get('resources', [])[:100]]
+                summary = dict(sync=status.get('sync', {}).get('status'), health=status.get('health', {}).get('status'),
+                               phase=status.get('operationState', {}).get('phase'),
+                               revisionMatches=status.get('sync', {}).get('revision') == self.revision,
+                               sourceMatches=status.get('sync', {}).get('comparedTo', {}).get('source') == self.app['spec']['source'],
+                               resources=resources)
+                print('Disposable component status (no error bodies): ' + json.dumps(summary), flush=True)
+                self.readiness_diagnostics()
                 raise RuntimeError(self.namespace + ' Argo convergence timed out; condition types: ' + str(kinds))
             time.sleep(2)
+
+    def readiness_diagnostics(self):
+        # Only public fixture identities and reason codes. Never dump Secret
+        # objects, pod specs, environment values, controller logs or messages.
+        try:
+            pods = self.api('get', 'pods', '-n', self.namespace, '-o', 'json').get('items', [])
+            public = []
+            for pod in pods[:20]:
+                containers = []
+                for container in pod.get('status', {}).get('containerStatuses', []):
+                    state = container.get('state', {})
+                    containers.append(dict(name=container.get('name'), ready=container.get('ready'), restarts=container.get('restartCount'),
+                                           waiting=state.get('waiting', {}).get('reason'), terminated=state.get('terminated', {}).get('reason')))
+                public.append(dict(name=pod['metadata']['name'], phase=pod.get('status', {}).get('phase'), containers=containers,
+                                   conditions=[{key: condition.get(key) for key in ['type', 'status', 'reason']}
+                                               for condition in pod.get('status', {}).get('conditions', [])]))
+            print('Disposable component pod readiness: ' + json.dumps(public), flush=True)
+            for kind in ['issuers.cert-manager.io', 'certificates.cert-manager.io']:
+                items = self.api('get', kind, '-n', self.namespace, '-o', 'json').get('items', [])
+                print('Disposable ' + kind + ': ' + json.dumps([dict(name=item['metadata']['name'], conditions=[
+                    {key: condition.get(key) for key in ['type', 'status', 'reason']} for condition in item.get('status', {}).get('conditions', [])]) for item in items[:20]]), flush=True)
+            if self.namespace == 'metrics-server':
+                service = self.api('get', 'apiservice', 'v1beta1.metrics.k8s.io', '--ignore-not-found', '-o', 'json')
+                print('Disposable aggregation readiness: ' + json.dumps(dict(caPresent=bool(service.get('spec', {}).get('caBundle')),
+                    insecure=service.get('spec', {}).get('insecureSkipTLSVerify', False), conditions=[
+                        {key: condition.get(key) for key in ['type', 'status', 'reason']} for condition in service.get('status', {}).get('conditions', [])])), flush=True)
+                log = self.command('logs', 'deployment/metrics-server', '-n', self.namespace, '--tail=30').decode(errors='replace').lower()
+                patterns = {'untrusted-ca': 'unknown authority', 'missing-ip-san': "doesn't contain any ip sans", 'permission-denied': 'permission denied',
+                            'authentication-refused': 'unauthorized', 'authorization-refused': 'forbidden', 'scrape-failure': 'failed to scrape',
+                            'empty-metrics-cache': 'no metrics', 'authentication-config': 'extension-apiserver-authentication',
+                            'missing-file': 'no such file', 'invalid-flag': 'unknown flag'}
+                print('Disposable Metrics Server diagnostic categories: ' + json.dumps([name for name, pattern in patterns.items() if pattern in log]), flush=True)
+        except (RuntimeError, KeyError, TypeError, subprocess.SubprocessError):
+            print('Disposable readiness diagnostics unavailable; no raw response was exposed.', flush=True)
 
     def refresh(self):
         previous = self.api('get', 'application', self.name, '-n', 'argocd', '-o', 'json')['status']['reconciledAt']

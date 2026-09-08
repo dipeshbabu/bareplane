@@ -3,10 +3,52 @@
 import base64
 import datetime
 import hashlib
+import os
+import re
+import socket
+import ssl
 import subprocess
+import tempfile
 import time
 
 from component_acceptance import ComponentAcceptance
+
+
+def verify_fresh_serving_tls(component, work, certificate):
+    """Require a fresh backend handshake, not a cached aggregation connection."""
+    args = [arg for arg in component.kubectl if not arg.startswith('--request-timeout=')]
+    args += ['--request-timeout=0', 'port-forward', 'service/metrics-server', ':443', '-n', 'metrics-server',
+             '--address=127.0.0.1', '--pod-running-timeout=15s']
+    with tempfile.TemporaryFile(dir=work) as output:
+        process = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT)
+        try:
+            deadline = time.monotonic() + 30
+            while True:
+                # pread keeps the child's shared output-file offset unchanged.
+                match = re.search(rb'Forwarding from 127\.0\.0\.1:([0-9]+) -> ', os.pread(output.fileno(), 8192, 0))
+                if match:
+                    port = int(match.group(1))
+                    break
+                if process.poll() is not None or time.monotonic() >= deadline:
+                    raise RuntimeError('Disposable Metrics Server TLS forwarding did not become ready')
+                time.sleep(0.1)
+            context = ssl.create_default_context(cadata=certificate.decode('ascii'))
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
+            with socket.create_connection(('127.0.0.1', port), timeout=5) as connection:
+                with context.wrap_socket(connection, server_hostname='metrics-server.metrics-server.svc') as secure:
+                    actual = secure.getpeercert(binary_form=True)
+            if actual != ssl.PEM_cert_to_DER_cert(certificate.decode('ascii')):
+                raise RuntimeError('Metrics Server did not present the current approved serving certificate')
+        except OSError:
+            raise RuntimeError('A fresh Metrics Server TLS handshake has not converged to its current trust bundle') from None
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=2)
 
 
 def run_metrics_server_acceptance(kubectl, repository, work, nodes):
@@ -42,6 +84,7 @@ def run_metrics_server_acceptance(kubectl, repository, work, nodes):
                     raise RuntimeError('Pod resource metrics are missing')
                 command('top', 'nodes')
                 command('top', 'pods', '-n', 'metrics-server')
+                verify_fresh_serving_tls(component, work, public_certificate())
                 return
             except RuntimeError:
                 if time.monotonic() >= deadline:
