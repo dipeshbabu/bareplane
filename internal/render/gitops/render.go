@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"strconv"
 	"strings"
 
 	"github.com/dipeshbabu/bareplane/internal/config"
+	"github.com/dipeshbabu/bareplane/internal/platform"
 	"gopkg.in/yaml.v3"
 )
 
@@ -34,42 +36,47 @@ func Render(cfg config.Config) (map[string][]byte, error) {
 	if err := cfg.ValidateGitOps(); err != nil {
 		return nil, err
 	}
-	// The component graph replaces this small, explicit availability gate in #72.
-	// Never present an unimplemented profile as a successfully rendered cluster.
-	for _, profile := range cfg.Spec.Profiles {
-		if profile != "minimal" {
-			return nil, fmt.Errorf("GitOps profile %q is unavailable until its platform components are implemented", profile)
-		}
+	resolved, err := platform.ResolveConfig(cfg)
+	if err != nil {
+		return nil, err
 	}
-	if cfg.Spec.Features.GPU || cfg.Spec.Features.Observability || cfg.Spec.DNS.Provider != "manual" || cfg.Spec.Secrets.Provider != "sops" {
-		return nil, fmt.Errorf("GitOps rendering currently supports only minimal with GPU/observability disabled, manual DNS, and the SOPS extension boundary; requested platform components are unavailable")
+	if err := resolved.RequireAvailable(false); err != nil {
+		return nil, err
 	}
+	components := resolved.GitOpsComponents()
 	root := cfg.Spec.GitOps.RootPath
 	switch strings.Split(root, "/")[0] {
 	case "bootstrap", "components", "profiles", "readme.md":
 		return nil, fmt.Errorf("spec.gitops.rootPath overlaps a reserved generated repository path")
 	}
 	files := make(map[string][]byte)
-	if err := fs.WalkDir(assets, "assets", func(name string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil || entry.IsDir() {
-			return walkErr
+	for _, component := range components {
+		if err := fs.WalkDir(assets, "assets/"+component.ID, func(name string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil || entry.IsDir() {
+				return walkErr
+			}
+			data, err := assets.ReadFile(name)
+			if err != nil {
+				return err
+			}
+			// Inputs are validated DNS labels, not arbitrary YAML fragments.
+			data = []byte(strings.ReplaceAll(strings.ReplaceAll(string(data), "\r\n", "\n"), "BAREPLANE_CLUSTER_NAME", cfg.Metadata.Name))
+			files["components/"+strings.TrimPrefix(name, "assets/")] = data
+			return nil
+		}); err != nil {
+			return nil, fmt.Errorf("implemented component %s has no usable embedded payload: %w", component.ID, err)
 		}
-		data, err := assets.ReadFile(name)
-		if err != nil {
-			return err
-		}
-		// Inputs are validated DNS labels, not arbitrary YAML fragments.
-		data = []byte(strings.ReplaceAll(strings.ReplaceAll(string(data), "\r\n", "\n"), "BAREPLANE_CLUSTER_NAME", cfg.Metadata.Name))
-		files["components/"+strings.TrimPrefix(name, "assets/")] = data
-		return nil
-	}); err != nil {
-		return nil, fmt.Errorf("read embedded GitOps assets: %w", err)
 	}
+	resources := make([]string, 0, len(components))
 	objects := map[string]any{
 		"bootstrap/" + cfg.Metadata.Name + "-root-application.yaml": application(cfg, "root", root, "-30"),
-		path.Join(root, "kustomization.yaml"):                       kustomization("applications/argocd.yaml"),
-		path.Join(root, "applications/argocd.yaml"):                 application(cfg, "argocd", "components/argocd", "-30"),
 	}
+	for _, component := range components {
+		name := "applications/" + component.ID + ".yaml"
+		resources = append(resources, name)
+		objects[path.Join(root, name)] = application(cfg, component.ID, "components/"+component.ID, strconv.Itoa(component.Wave))
+	}
+	objects[path.Join(root, "kustomization.yaml")] = kustomization(resources...)
 	for name, obj := range objects {
 		data, err := yaml.Marshal(obj)
 		if err != nil {

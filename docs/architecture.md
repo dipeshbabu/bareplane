@@ -2,6 +2,8 @@
 
 ## GitOps source of truth
 
+The [component graph](platform-graph.md) centralizes profile sets, dependencies, ownership exclusions, availability gates, and deterministic Argo ordering. Planned capabilities remain explicitly unavailable until their focused implementations and health contracts exist.
+
 The [user-owned GitOps contract](gitops.md) separates bootstrap from platform reconciliation. Bareplane keeps ownership of Kubernetes bootstrap, kube-vip, and Cilium; it may directly install only minimal Argo CD bootstrap resources and the root Application for handoff. The published user repository owns subsequent platform desired state through Argo. Repository rendering, Argo bootstrap, handoff verification, and dependency-driven profiles remain separate components, and none may silently take over bootstrap-owned Cilium.
 
 Bareplane separates user intent, infrastructure provisioning, cluster bootstrap, and continuous reconciliation.
