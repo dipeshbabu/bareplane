@@ -41,6 +41,9 @@ without granting client-authentication usage. The serving identity is restricted
 to `metrics-server.metrics-server.svc`, uses ECDSA P-256, and renews 30 days before
 its 90-day expiry with key rotation. Serving files reload through the Kubernetes
 API-server library; readiness must reconverge after certificate and trust updates.
+cert-manager may retain the previous certificate in an overlapping trust bundle
+during rotation. Acceptance allows only the known previous/current certificates
+and requires a fresh backend TLS handshake presenting the current certificate.
 Neither CA material nor private keys are emitted into Git.
 
 ## Payload and privileges

@@ -14,6 +14,27 @@ import time
 from component_acceptance import ComponentAcceptance
 
 
+CERTIFICATE_BLOCK = re.compile(rb'-----BEGIN CERTIFICATE-----\s+[A-Za-z0-9+/=\r\n]+-----END CERTIFICATE-----')
+
+
+def certificate_der(certificate):
+    return ssl.PEM_cert_to_DER_cert(certificate.decode('ascii'))
+
+
+def valid_rotation_bundle(bundle, current, known):
+    """Allow the known overlap from cainjector merging, never an unrelated CA."""
+    if len(bundle) > 65536:
+        return False
+    blocks = CERTIFICATE_BLOCK.findall(bundle)
+    if not blocks or CERTIFICATE_BLOCK.sub(b'', bundle).strip():
+        return False
+    try:
+        certificates = [certificate_der(block) for block in blocks]
+    except (ValueError, UnicodeError):
+        return False
+    return current in certificates and len(certificates) == len(set(certificates)) and set(certificates) <= known
+
+
 def verify_fresh_serving_tls(component, work, certificate):
     """Require a fresh backend handshake, not a cached aggregation connection."""
     args = [arg for arg in component.kubectl if not arg.startswith('--request-timeout=')]
@@ -37,7 +58,7 @@ def verify_fresh_serving_tls(component, work, certificate):
             with socket.create_connection(('127.0.0.1', port), timeout=5) as connection:
                 with context.wrap_socket(connection, server_hostname='metrics-server.metrics-server.svc') as secure:
                     actual = secure.getpeercert(binary_form=True)
-            if actual != ssl.PEM_cert_to_DER_cert(certificate.decode('ascii')):
+            if actual != certificate_der(certificate):
                 raise RuntimeError('Metrics Server did not present the current approved serving certificate')
         except OSError:
             raise RuntimeError('A fresh Metrics Server TLS handshake has not converged to its current trust bundle') from None
@@ -61,14 +82,18 @@ def run_metrics_server_acceptance(kubectl, repository, work, nodes):
     def public_certificate():
         return base64.b64decode(command('get', 'secret', 'metrics-server-serving', '-n', 'metrics-server', '-o', r'jsonpath={.data.tls\.crt}'), validate=True)
 
-    def verify_metrics():
+    certificate = public_certificate()
+    trusted_history = {certificate_der(certificate)}
+
+    def verify_metrics(expected):
         deadline = time.monotonic() + 180
         while True:
             try:
                 service = api('get', 'apiservice', 'v1beta1.metrics.k8s.io', '-o', 'json')
                 if service['spec'].get('insecureSkipTLSVerify', False) is not False or not service['spec'].get('caBundle'):
                     raise RuntimeError('Metrics APIService does not require verified TLS')
-                if base64.b64decode(service['spec']['caBundle'], validate=True) != public_certificate():
+                if public_certificate() != expected or not valid_rotation_bundle(base64.b64decode(service['spec']['caBundle'], validate=True),
+                                                                                certificate_der(expected), trusted_history):
                     raise RuntimeError('Metrics APIService trust has not followed the serving certificate')
                 metrics = api('get', '--raw=/apis/metrics.k8s.io/v1beta1/nodes')['items']
                 if {item['metadata']['name'] for item in metrics} != set(nodes):
@@ -84,15 +109,14 @@ def run_metrics_server_acceptance(kubectl, repository, work, nodes):
                     raise RuntimeError('Pod resource metrics are missing')
                 command('top', 'nodes')
                 command('top', 'pods', '-n', 'metrics-server')
-                verify_fresh_serving_tls(component, work, public_certificate())
+                verify_fresh_serving_tls(component, work, expected)
                 return
             except RuntimeError:
                 if time.monotonic() >= deadline:
                     raise
                 time.sleep(2)
 
-    verify_metrics()
-    certificate = public_certificate()
+    verify_metrics(certificate)
     (work / 'metrics-server-public.crt').write_bytes(certificate)
     verified = subprocess.run(['openssl', 'verify', '-no-CApath', '-no-CAstore', '-check_ss_sig', '-purpose', 'sslserver', '-CAfile', str(work / 'metrics-server-public.crt'),
                                '-verify_hostname', 'metrics-server.metrics-server.svc', str(work / 'metrics-server-public.crt')],
@@ -118,7 +142,9 @@ def run_metrics_server_acceptance(kubectl, repository, work, nodes):
         if time.monotonic() >= deadline:
             raise RuntimeError('Metrics serving certificate did not rotate')
         time.sleep(2)
-    verify_metrics()
+    rotated = public_certificate()
+    trusted_history.add(certificate_der(rotated))
+    verify_metrics(rotated)
     component.refresh()
     if component.deployment_identity('metrics-server') != identity:
         raise RuntimeError('Certificate rotation or unchanged reconciliation replaced the Metrics Server workload')
