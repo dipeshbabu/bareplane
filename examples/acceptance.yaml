@@ -1,0 +1,62 @@
+# Documentation-only Proxmox RC reference. Replace every example endpoint,
+# address, storage/image identifier, key path, and Git repository before use.
+apiVersion: bareplane.io/v1alpha1
+kind: BareplaneCluster
+metadata:
+  name: bp-rc
+spec:
+  domain: bp-rc.example.invalid
+  provider:
+    type: proxmox
+    endpoint: https://proxmox.example.invalid:8006
+    targets: [pve1]
+    proxmox:
+      bridge: vmbr0
+      systemDatastore: local-lvm
+      cloudImageFileID: local:import/ubuntu-24.04-20260826.qcow2
+      ssh:
+        user: ubuntu
+        publicKeyFile: secrets/controller_id_ed25519.pub
+  nodes:
+    - name: control
+      role: control-plane
+      count: 3
+      cpu: 4
+      memoryGB: 8
+      diskGB: 64
+    - name: worker
+      role: worker
+      count: 1
+      cpu: 4
+      memoryGB: 8
+      diskGB: 64
+  bootstrap:
+    ssh:
+      user: ubuntu
+      privateKeyFile: secrets/controller_id_ed25519
+      port: 22
+      hosts:
+        bp-rc-control-1: 192.0.2.11
+        bp-rc-control-2: 192.0.2.12
+        bp-rc-control-3: 192.0.2.13
+        bp-rc-worker-1: 192.0.2.21
+  kubernetes:
+    version: 1.36.4
+    apiVIP: 192.0.2.100
+    podCIDR: 10.244.0.0/16
+    serviceCIDR: 10.96.0.0/12
+    kubeVIPVersion: 1.2.3
+    ciliumVersion: 1.20.1
+    kubeProxyReplacement: true
+  gitops:
+    repoURL: https://github.com/example/bareplane-rc.git
+    revision: main
+    rootPath: clusters/bp-rc
+  features:
+    observability: false
+    gpu: false
+  profiles: [minimal]
+  dns:
+    provider: manual
+  secrets:
+    provider: sops
