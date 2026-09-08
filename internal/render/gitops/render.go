@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/dipeshbabu/bareplane/internal/config"
-	"github.com/dipeshbabu/bareplane/internal/platform"
 	"gopkg.in/yaml.v3"
 )
 
@@ -36,7 +35,7 @@ func Render(cfg config.Config) (map[string][]byte, error) {
 	if err := cfg.ValidateGitOps(); err != nil {
 		return nil, err
 	}
-	resolved, err := platform.ResolveConfig(cfg)
+	resolved, err := cfg.ResolvePlatform()
 	if err != nil {
 		return nil, err
 	}

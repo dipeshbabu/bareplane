@@ -45,6 +45,8 @@ type Resolution struct{ Components []Resolved }
 
 var identifier = regexp.MustCompile(`^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
+func ValidIdentifier(value string) bool { return identifier.MatchString(value) }
+
 func copyComponent(component Component) Component {
 	component.Dependencies = append([]string(nil), component.Dependencies...)
 	component.Conflicts = append([]string(nil), component.Conflicts...)

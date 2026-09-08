@@ -6,8 +6,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-
-	"github.com/dipeshbabu/bareplane/internal/config"
 )
 
 func component(id string, dependencies ...string) Component {
@@ -189,7 +187,7 @@ func TestOrderingWavesAndCopiesAreDeterministic(t *testing.T) {
 	}
 }
 
-func TestAvailabilityAndConfigFlagsDoNotEnablePartialPlatforms(t *testing.T) {
+func TestExperimentalAvailabilityRequiresExplicitOptIn(t *testing.T) {
 	experimental := component("experiment")
 	experimental.Status = Experimental
 	registry, err := New([]Component{experimental})
@@ -199,24 +197,5 @@ func TestAvailabilityAndConfigFlagsDoNotEnablePartialPlatforms(t *testing.T) {
 	result, err := registry.Resolve(Selection{Enabled: []string{"experiment"}})
 	if err != nil || result.RequireAvailable(false) == nil || result.RequireAvailable(true) != nil {
 		t.Fatal("experimental gate is ineffective")
-	}
-	for _, change := range []func(*config.Config){
-		func(c *config.Config) { c.Spec.Features.GPU = true },
-		func(c *config.Config) { c.Spec.Features.Observability = true },
-		func(c *config.Config) { c.Spec.DNS.Provider = "cloudflare" },
-		func(c *config.Config) { c.Spec.Secrets.Provider = "vault" },
-	} {
-		cfg := config.Config{}
-		change(&cfg)
-		result, err := ResolveConfig(cfg)
-		if err != nil || result.RequireAvailable(false) == nil {
-			t.Fatal("unavailable config capability accepted")
-		}
-	}
-	cfg := config.Config{}
-	cfg.Spec.Secrets.Provider = "sops"
-	result, err = ResolveConfig(cfg)
-	if err != nil || result.RequireAvailable(false) != nil {
-		t.Fatal("SOPS extension boundary unexpectedly installed a controller")
 	}
 }

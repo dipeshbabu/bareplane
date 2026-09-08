@@ -47,6 +47,8 @@ spec:
     observability: false
     gpu: false
   profiles: [minimal]
+  components:
+    disabled: [metrics-server, cert-manager, observability, external-dns, storage, secrets-sops, vault]
   dns:
     provider: manual
   secrets:

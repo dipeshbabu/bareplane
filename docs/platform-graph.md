@@ -17,6 +17,8 @@ Jupyter/OpenWebUI and alternative or supporting data services (Flink, ClickHouse
 
 The existing `gpu`, `observability`, Cloudflare DNS, and Vault config choices request their corresponding capabilities through the same registry. Default SOPS configuration is still the documented extension boundary, not an implicit request to install an unavailable secret-delivery controller. SOPS and Vault backend selections conflict when both are explicitly selected through the resolver API.
 
+[`spec.components`](component-selection.md) exposes strict explicit selections. Configuration maps profiles, optional enable/disable lists, and existing flags into one registry resolution; the registry itself does not import configuration.
+
 ## Resolution and ordering
 
 `Registry.Resolve` produces a diagnostic plan and automatically includes dependencies. Explicitly disabled required/profile dependencies, incompatible selections, unknown references, invalid metadata, and cycles fail. Defaults can be disabled only when they are not also required by a selected profile or dependency. Profiles and enabled component lists are treated as sets.

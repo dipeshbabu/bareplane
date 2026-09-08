@@ -1,7 +1,5 @@
 package platform
 
-import "github.com/dipeshbabu/bareplane/internal/config"
-
 func Builtin() (*Registry, error) {
 	components := []Component{
 		{ID: "cilium", Owner: Bootstrap, Status: Implemented, DefaultEnabled: true, BaseWave: -50},
@@ -38,28 +36,4 @@ func Builtin() (*Registry, error) {
 		components = append(components, component)
 	}
 	return New(components)
-}
-
-// ResolveConfig maps existing config choices to one graph. The default SOPS
-// value remains an extension boundary until secret delivery is implemented;
-// it does not silently request a currently unavailable secret controller.
-func ResolveConfig(cfg config.Config) (Resolution, error) {
-	registry, err := Builtin()
-	if err != nil {
-		return Resolution{}, err
-	}
-	selection := Selection{Profiles: cfg.Spec.Profiles}
-	if cfg.Spec.Features.GPU {
-		selection.Enabled = append(selection.Enabled, "gpu-scheduling")
-	}
-	if cfg.Spec.Features.Observability {
-		selection.Enabled = append(selection.Enabled, "observability")
-	}
-	if cfg.Spec.DNS.Provider == "cloudflare" {
-		selection.Enabled = append(selection.Enabled, "external-dns")
-	}
-	if cfg.Spec.Secrets.Provider == "vault" {
-		selection.Enabled = append(selection.Enabled, "vault")
-	}
-	return registry.Resolve(selection)
 }

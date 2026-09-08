@@ -4,6 +4,8 @@ This repository also hosts a generated, public **test fixture**, not an operator
 
 The files contain no runtime credentials. They are published here so disposable CI clusters can prove anonymous Git reachability and, in the separate handoff implementation, real Argo reconciliation. Bareplane's CLI still never commits or pushes user repositories. Do not apply this fixture to an existing cluster.
 
+The fixture explicitly disables optional core defaults to keep M1/M2 regression coverage stable. Its generated payload still contains only the implemented Argo foundation; component-specific and full core-profile acceptance are separate tests.
+
 `TestPublishedArgoFixtureMatchesRenderer` verifies every generated payload file against the actual renderer. Maintainers deliberately regenerate these documented fixture paths with:
 
 ```bash
