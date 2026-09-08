@@ -29,7 +29,7 @@ func TestDNSPayloadIsPinnedServiceOnlyAndDefaultsToDryRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
-	if got := fmt.Sprintf("%x", sha256.Sum256(data)); got != "2c85f8d08b914a7c33db3f3deac0fa295988ec9aaab66fedb4141a7f234210a4" {
+	if got := fmt.Sprintf("%x", sha256.Sum256(data)); got != "7795a402d8183cf48301c370181c6f4c39ccca2bac92cdd52016658d4b161dd3" {
 		t.Fatalf("unreviewed DNS payload: %s", got)
 	}
 	cfg := dnsFixture(t)
@@ -75,10 +75,13 @@ func TestDNSPayloadIsPinnedServiceOnlyAndDefaultsToDryRun(t *testing.T) {
 			args := fmt.Sprint(container["args"])
 			for _, argument := range []string{"--source=service", "--service-type-filter=LoadBalancer", "--namespace=apps",
 				"--domain-filter=apps.example.test", "--zone-id-filter=" + strings.Repeat("a", 32), "--policy=upsert-only",
-				"--registry=txt", "--txt-owner-id=" + strings.Repeat("b", 32), "--dry-run=true"} {
+				"--registry=txt", "--txt-owner-id=" + strings.Repeat("b", 32), "--dry-run"} {
 				if !strings.Contains(args, argument) {
 					t.Fatalf("missing scoped DNS argument: %s", argument)
 				}
+			}
+			if strings.Contains(args, "--dry-run=") {
+				t.Fatal("DNS renderer emitted unsupported boolean assignment syntax")
 			}
 			env := container["env"].([]any)[0].(map[string]any)
 			if env["name"] != "CF_API_TOKEN" || env["value"] != nil || env["valueFrom"] == nil {
@@ -103,10 +106,13 @@ func TestDNSInputStringsKeepTheirTypesAndApplyRequiresExplicitMode(t *testing.T)
 	}
 	data := string(files["components/external-dns/upstream.yaml"])
 	for _, expected := range []string{`bareplane.io/cluster: "false"`, `namespace: "on"`, `name: "123"`, `key: "false"`,
-		`bareplane.io/credentials-revision: "2026-01-01"`, `"--namespace=on"`, `"--dry-run=false"`} {
+		`bareplane.io/credentials-revision: "2026-01-01"`, `"--namespace=on"`} {
 		if !strings.Contains(data, expected) {
 			t.Fatalf("DNS scalar or explicit mode lost its type: %s", expected)
 		}
+	}
+	if strings.Contains(data, "--dry-run") {
+		t.Fatal("explicit apply retained the dry-run switch")
 	}
 	cfg.Spec.DNS.Automation = nil
 	if err := renderDNS(cfg, map[string][]byte{}); err == nil {

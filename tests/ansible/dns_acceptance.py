@@ -74,7 +74,9 @@ def run_dns_acceptance(kubectl, repository, work):
     with FakeCloudflareServer(model, '192.0.2.1') as server:
         def desired_source(mode, revision='initial'):
             args = [argument.replace('--interval=1m', '--interval=2s') for argument in deployment['spec']['template']['spec']['containers'][0]['args']]
-            args = ['--dry-run=' + ('true' if mode == 'dry-run' else 'false') if argument.startswith('--dry-run=') else argument for argument in args]
+            args = [argument for argument in args if argument != '--dry-run' and not argument.startswith('--dry-run=')]
+            if mode == 'dry-run':
+                args.append('--dry-run')
             patch = dict(apiVersion='apps/v1', kind='Deployment', metadata=dict(name='external-dns'), spec=dict(template=dict(
                 metadata=dict(annotations={'bareplane.io/credentials-revision': revision}),
                 spec=dict(containers=[dict(name='external-dns', args=args, env=[dict(name='CLOUDFLARE_BASE_URL', value=server.url)])]))))
@@ -89,15 +91,13 @@ def run_dns_acceptance(kubectl, repository, work):
                  'Argo did not create the disposable DNS controller namespace')
         # Fail closed if the test-only SDK endpoint override is ever ineffective:
         # public Cloudflare addresses cannot be reached by this Pod.
-        policy = dict(apiVersion='networking.k8s.io/v1', kind='NetworkPolicy',
+        policy = dict(apiVersion='cilium.io/v2', kind='CiliumNetworkPolicy',
                       metadata=dict(name='disposable-fake-api-only', namespace='external-dns'), spec=dict(
-                          podSelector=dict(matchLabels={'app': 'external-dns'}), policyTypes=['Egress'], egress=[
-                              {'to': [{'ipBlock': {'cidr': '192.0.2.1/32'}}], 'ports': [{'protocol': 'TCP', 'port': urlsplit(server.url).port}]},
-                              {'to': [{'ipBlock': {'cidr': '192.0.2.0/24'}}, {'ipBlock': {'cidr': '10.96.0.1/32'}}],
-                               'ports': [{'protocol': 'TCP', 'port': 443}, {'protocol': 'TCP', 'port': 6443}]},
-                              {'to': [{'namespaceSelector': {'matchLabels': {'kubernetes.io/metadata.name': 'kube-system'}},
-                                       'podSelector': {'matchLabels': {'k8s-app': 'kube-dns'}}}],
-                               'ports': [{'protocol': 'UDP', 'port': 53}, {'protocol': 'TCP', 'port': 53}]},
+                          endpointSelector=dict(matchLabels={'app': 'external-dns'}), egress=[
+                              {'toCIDR': ['192.0.2.1/32'], 'toPorts': [{'ports': [{'protocol': 'TCP', 'port': str(urlsplit(server.url).port)}]}]},
+                              {'toEntities': ['kube-apiserver'], 'toPorts': [{'ports': [{'protocol': 'TCP', 'port': '443'}, {'protocol': 'TCP', 'port': '6443'}]}]},
+                              {'toEndpoints': [{'matchLabels': {'k8s:io.kubernetes.pod.namespace': 'kube-system', 'k8s:k8s-app': 'kube-dns'}}],
+                               'toPorts': [{'ports': [{'protocol': 'UDP', 'port': '53'}, {'protocol': 'TCP', 'port': '53'}]}]},
                           ]))
         command('create', '-f', '-', data=policy)
         # Only a deliberately powerless fake token is created, after egress is

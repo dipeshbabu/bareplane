@@ -82,12 +82,13 @@ class ComponentAcceptance:
                 for container in pod.get('status', {}).get('containerStatuses', []):
                     state = container.get('state', {})
                     containers.append(dict(name=container.get('name'), ready=container.get('ready'), restarts=container.get('restartCount'),
-                                           waiting=state.get('waiting', {}).get('reason'), terminated=state.get('terminated', {}).get('reason')))
+                                           waiting=state.get('waiting', {}).get('reason'), terminated=state.get('terminated', {}).get('reason'),
+                                           previousExit=container.get('lastState', {}).get('terminated', {}).get('exitCode')))
                 public.append(dict(name=pod['metadata']['name'], phase=pod.get('status', {}).get('phase'), containers=containers,
                                    conditions=[{key: condition.get(key) for key in ['type', 'status', 'reason']}
                                                for condition in pod.get('status', {}).get('conditions', [])]))
             print('Disposable component pod readiness: ' + json.dumps(public), flush=True)
-            for kind in ['issuers.cert-manager.io', 'certificates.cert-manager.io']:
+            for kind in (['issuers.cert-manager.io', 'certificates.cert-manager.io'] if self.namespace in {'cert-manager', 'metrics-server'} else []):
                 items = self.api('get', kind, '-n', self.namespace, '-o', 'json').get('items', [])
                 print('Disposable ' + kind + ': ' + json.dumps([dict(name=item['metadata']['name'], conditions=[
                     {key: condition.get(key) for key in ['type', 'status', 'reason']} for condition in item.get('status', {}).get('conditions', [])]) for item in items[:20]]), flush=True)
@@ -102,6 +103,13 @@ class ComponentAcceptance:
                             'empty-metrics-cache': 'no metrics', 'authentication-config': 'extension-apiserver-authentication',
                             'missing-file': 'no such file', 'invalid-flag': 'unknown flag'}
                 print('Disposable Metrics Server diagnostic categories: ' + json.dumps([name for name, pattern in patterns.items() if pattern in log]), flush=True)
+            if self.namespace == 'external-dns':
+                log = self.command('logs', 'deployment/external-dns', '-n', self.namespace, '--tail=40').decode(errors='replace').lower()
+                patterns = {'invalid-flag': 'unknown long flag', 'unexpected-argument': 'unexpected', 'permission-denied': 'permission denied',
+                            'kubernetes-forbidden': 'forbidden', 'request-timeout': 'timeout', 'missing-credentials': 'credentials are not configured',
+                            'cloudflare-refused': 'refused', 'missing-kubeconfig': 'kubeconfig', 'no-zone': 'no hosted zone',
+                            'cache-not-synced': 'cache to sync', 'read-only-filesystem': 'read-only file system'}
+                print('Disposable DNS diagnostic categories: ' + json.dumps([name for name, pattern in patterns.items() if pattern in log]), flush=True)
         except (RuntimeError, KeyError, TypeError, subprocess.SubprocessError):
             print('Disposable readiness diagnostics unavailable; no raw response was exposed.', flush=True)
 

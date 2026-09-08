@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"strconv"
 	"strings"
 
 	"github.com/dipeshbabu/bareplane/internal/config"
@@ -29,7 +28,6 @@ func renderDNS(cfg config.Config, files map[string][]byte) error {
 		"BAREPLANE_DNS_ZONE_ID", settings.ZoneID,
 		"BAREPLANE_DNS_DOMAIN", settings.Domain,
 		"BAREPLANE_DNS_OWNER_ID", settings.OwnerID,
-		"BAREPLANE_DNS_DRY_RUN", strconv.FormatBool(settings.EffectiveMode() == "dry-run"),
 		"BAREPLANE_DNS_SECRET_NAME", settings.TokenSecret.Name,
 		"BAREPLANE_DNS_SECRET_KEY", settings.TokenSecret.Key,
 	)
@@ -41,9 +39,17 @@ func renderDNS(cfg config.Config, files map[string][]byte) error {
 			// 1.1 and 1.2, including numeric Secret names/keys and revisions.
 			node.Style = yaml.DoubleQuotedStyle
 		}
+		children := node.Content[:0]
 		for _, child := range node.Content {
+			// Kingpin boolean switches do not accept --flag=true/false. Apply
+			// mode deliberately omits this switch; dry-run retains its presence.
+			if node.Kind == yaml.SequenceNode && child.Kind == yaml.ScalarNode && child.Value == "--dry-run" && settings.EffectiveMode() == "apply" {
+				continue
+			}
 			visit(child)
+			children = append(children, child)
 		}
+		node.Content = children
 	}
 	var output bytes.Buffer
 	encoder := yaml.NewEncoder(&output)

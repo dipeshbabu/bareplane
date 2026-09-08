@@ -47,7 +47,7 @@ spec:
         - --txt-prefix=bareplane-
         - --policy=upsert-only
         - --interval=1m
-        - --dry-run=BAREPLANE_DNS_DRY_RUN
+        - --dry-run
         - --cloudflare-dns-records-per-page=5000
         - --batch-change-size=200
         - --batch-change-interval=1s

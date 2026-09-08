@@ -55,7 +55,7 @@ def curate(directory):
                 '--annotation-filter=bareplane.io/dns-managed=true', '--provider=cloudflare',
                 '--zone-id-filter=BAREPLANE_DNS_ZONE_ID', '--domain-filter=BAREPLANE_DNS_DOMAIN',
                 '--registry=txt', '--txt-owner-id=BAREPLANE_DNS_OWNER_ID', '--txt-prefix=bareplane-',
-                '--policy=upsert-only', '--interval=1m', '--dry-run=BAREPLANE_DNS_DRY_RUN',
+                '--policy=upsert-only', '--interval=1m', '--dry-run',
                 '--cloudflare-dns-records-per-page=5000', '--batch-change-size=200', '--batch-change-interval=1s',
             ]
             container['env'] = [dict(name='CF_API_TOKEN', valueFrom=dict(secretKeyRef=dict(name='BAREPLANE_DNS_SECRET_NAME', key='BAREPLANE_DNS_SECRET_KEY')))]
