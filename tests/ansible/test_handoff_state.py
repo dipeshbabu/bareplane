@@ -33,6 +33,47 @@ with patch.dict(sys.modules, {'ansible': types.ModuleType('ansible'), 'ansible.m
     handoff = load('handoff_state', 'internal/render/ansible/assets/module_utils/bareplane_handoff_state.py')
 
 
+class NewComponentOwnershipTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.resources = list(yaml.safe_load_all((ROOT / 'components/cert-manager/upstream.yaml').read_bytes()))
+        cls.resources += list(yaml.safe_load_all((ROOT / 'components/cert-manager/issuers.yaml').read_bytes()))
+
+    def setUp(self):
+        self.observed = []
+        self.existing = None
+
+    def json(self, *args):
+        self.observed.append(args)
+        return {'metadata': {'uid': 'foreign'}} if args[1:3] == self.existing else {}
+
+    def test_cold_component_checks_cluster_objects_without_writing(self):
+        handoff.verify_new_component_absence(self, self.resources)
+        self.assertTrue(self.observed)
+        self.assertTrue(all(args[0] == 'get' for args in self.observed))
+        self.assertIn(('get', 'Namespace', 'cert-manager', '--ignore-not-found', '-o', 'json'), self.observed)
+        self.assertEqual(sum(args[1] == 'CustomResourceDefinition' for args in self.observed), 6)
+
+    def test_existing_namespace_crd_rbac_or_webhook_is_never_adopted(self):
+        for resource in self.resources:
+            if resource['kind'] not in {'Namespace', 'CustomResourceDefinition', 'ClusterRole', 'ClusterRoleBinding',
+                                         'MutatingWebhookConfiguration', 'ValidatingWebhookConfiguration'}:
+                continue
+            self.existing = (resource['kind'], resource['metadata']['name'])
+            with self.subTest(resource=self.existing), self.assertRaises(git.GitOpsError):
+                handoff.verify_new_component_absence(self, self.resources)
+
+    def test_unrelated_namespace_and_undeclared_custom_resources_are_refused(self):
+        invalid = [
+            dict(apiVersion='v1', kind='ConfigMap', metadata=dict(name='foreign', namespace='kube-system')),
+            dict(apiVersion='unknown.io/v1', kind='Unknown', metadata=dict(name='foreign')),
+            dict(apiVersion='cert-manager.io/v1', kind='Certificate', metadata=dict(name='foreign')),
+        ]
+        for resource in invalid:
+            with self.subTest(resource=resource), self.assertRaises(git.GitOpsError):
+                handoff.verify_new_component_absence(self, self.resources + [resource])
+
+
 class HandoffPlanTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

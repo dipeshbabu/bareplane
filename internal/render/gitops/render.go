@@ -16,6 +16,7 @@ import (
 )
 
 const ArgoVersion = "3.5.2"
+const CertManagerVersion = "1.21.1"
 
 //go:embed assets
 var assets embed.FS
@@ -65,15 +66,22 @@ func Render(cfg config.Config) (map[string][]byte, error) {
 		}); err != nil {
 			return nil, fmt.Errorf("implemented component %s has no usable embedded payload: %w", component.ID, err)
 		}
+		if component.ID == "cert-manager" {
+			if err := renderCertificateIssuers(cfg, files); err != nil {
+				return nil, err
+			}
+		}
 	}
 	resources := make([]string, 0, len(components))
+	componentNames := make([]string, 0, len(components))
 	objects := map[string]any{
 		"bootstrap/" + cfg.Metadata.Name + "-root-application.yaml": application(cfg, "root", root, "-30"),
 	}
 	for _, component := range components {
 		name := "applications/" + component.ID + ".yaml"
+		componentNames = append(componentNames, component.ID)
 		resources = append(resources, name)
-		objects[path.Join(root, name)] = application(cfg, component.ID, "components/"+component.ID, strconv.Itoa(component.Wave))
+		objects[path.Join(root, name)] = application(cfg, component.ID, "components/"+component.ID, strconv.Itoa(component.Wave), component.Namespace)
 	}
 	objects[path.Join(root, "kustomization.yaml")] = kustomization(resources...)
 	for name, obj := range objects {
@@ -92,8 +100,8 @@ Do not initialize Git inside Bareplane's managed export. Copy the payload to a
 separate checkout, excluding .bareplane-*.json ownership metadata. Bareplane
 never commits or pushes this export. Re-rendering refuses edited/extra files.
 
-Only the pinned Argo CD %s control plane is available in the initial minimal
-profile. Cilium, kube-vip, CoreDNS, kubeadm and Linux stay bootstrap-owned.
+Selected GitOps components: %s. Argo CD %s provides their reconciliation.
+Cilium, kube-vip, CoreDNS, kubeadm and Linux stay bootstrap-owned.
 No SSH keys, kubeconfig, Terraform state, Git credentials or secret values are
 part of this repository. Empty Argo Secret declarations acquire values only at
 runtime; never commit those values. Argo's required Redis cache is ephemeral.
@@ -103,9 +111,9 @@ reviewed control-plane manifests after handoff. Bootstrap may install only this
 minimal control plane and the root Application, never the platform payload.
 Automated synchronization is enabled with pruning and self-heal disabled for
 initial handoff. Application deletion has no cascading resources finalizer.
-Use the guarded handoff workflow once implemented; do not directly apply this
+Use the guarded handoff workflow; do not directly apply this
 whole export. Rendering does not check repository reachability or cluster health.
-`, cfg.Metadata.Name, cfg.Spec.GitOps.RepoURL, cfg.Spec.GitOps.Revision, root, ArgoVersion))
+`, cfg.Metadata.Name, cfg.Spec.GitOps.RepoURL, cfg.Spec.GitOps.Revision, root, strings.Join(componentNames, ", "), ArgoVersion))
 	files["profiles/minimal/readme.md"] = []byte("# Minimal profile\n\nThe initial profile selects only components/argocd. It does not promise unimplemented observability, DNS automation, storage, AI or data services. Component additions and dependency resolution are separate tracked issues.\n")
 	return files, nil
 }
@@ -114,7 +122,11 @@ func kustomization(resources ...string) map[string]any {
 	return map[string]any{"apiVersion": "kustomize.config.k8s.io/v1beta1", "kind": "Kustomization", "resources": resources}
 }
 
-func application(cfg config.Config, component, sourcePath, wave string) map[string]any {
+func application(cfg config.Config, component, sourcePath, wave string, namespaces ...string) map[string]any {
+	namespace := "argocd"
+	if len(namespaces) > 0 && namespaces[0] != "" {
+		namespace = namespaces[0]
+	}
 	result := map[string]any{
 		"apiVersion": "argoproj.io/v1alpha1", "kind": "Application",
 		"metadata": map[string]any{
@@ -124,7 +136,7 @@ func application(cfg config.Config, component, sourcePath, wave string) map[stri
 		"spec": map[string]any{
 			"project":     "default",
 			"source":      map[string]string{"repoURL": cfg.Spec.GitOps.RepoURL, "targetRevision": cfg.Spec.GitOps.Revision, "path": sourcePath},
-			"destination": map[string]string{"server": "https://kubernetes.default.svc", "namespace": "argocd"},
+			"destination": map[string]string{"server": "https://kubernetes.default.svc", "namespace": namespace},
 			"syncPolicy": map[string]any{
 				"automated":   map[string]bool{"prune": false, "selfHeal": false, "allowEmpty": false},
 				"syncOptions": []string{"ServerSideApply=true", "FailOnSharedResource=true", "DisableClientSideApplyMigration=true"},
@@ -139,6 +151,14 @@ func application(cfg config.Config, component, sourcePath, wave string) map[stri
 		result["spec"].(map[string]any)["ignoreDifferences"] = []map[string]any{{
 			"group": "*", "kind": "*", "jsonPointers": []string{"/metadata/annotations/bareplane.io~1installation"},
 		}}
+		policy := result["spec"].(map[string]any)["syncPolicy"].(map[string]any)
+		policy["syncOptions"] = append(policy["syncOptions"].([]string), "RespectIgnoreDifferences=true")
+	}
+	if component == "cert-manager" {
+		result["spec"].(map[string]any)["ignoreDifferences"] = []map[string]any{
+			{"group": "admissionregistration.k8s.io", "kind": "MutatingWebhookConfiguration", "name": "cert-manager-webhook", "jqPathExpressions": []string{".webhooks[].clientConfig.caBundle"}},
+			{"group": "admissionregistration.k8s.io", "kind": "ValidatingWebhookConfiguration", "name": "cert-manager-webhook", "jqPathExpressions": []string{".webhooks[].clientConfig.caBundle"}},
+		}
 		policy := result["spec"].(map[string]any)["syncPolicy"].(map[string]any)
 		policy["syncOptions"] = append(policy["syncOptions"].([]string), "RespectIgnoreDifferences=true")
 	}

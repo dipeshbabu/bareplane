@@ -20,7 +20,7 @@ def main():
     from ansible.module_utils.bareplane_git_repository import Commands, GitOpsError, inspect_repository, require, validate_contract
     from ansible.module_utils.bareplane_argocd_state import Installer, Receipt
     from ansible.module_utils.bareplane_handoff_state import (
-        HandoffInterrupted, Plan, RootClient, RootRecord, RootWriter, repository_probe, wait_reconciliation,
+        HandoffInterrupted, Plan, RootClient, RootRecord, RootWriter, repository_probe, wait_reconciliation, verify_new_component_absence,
     )
     module = AnsibleModule(argument_spec=dict(
         kubeconfig=dict(type='path', required=True), cluster=dict(type='str', required=True), vip=dict(type='str', required=True),
@@ -108,6 +108,12 @@ def main():
                     with os.fdopen(descriptor, 'wb') as stream:
                         stream.write(data)
                 rendered = commands.run(['kubectl', 'kustomize', str(Path(temporary) / 'components/argocd')])
+                if record.original is None:
+                    for child in plan.children.values():
+                        source = child['spec']['source']['path']
+                        if source != 'components/argocd':
+                            component = commands.run(['kubectl', 'kustomize', str(Path(temporary) / source)])
+                            verify_new_component_absence(client, list(yaml.safe_load_all(component)))
             baseline = Installer(client, argo, list(yaml.safe_load_all(rendered)), p['cluster'])
             for obj in baseline.resources:
                 current = client.get(obj)

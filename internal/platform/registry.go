@@ -33,6 +33,7 @@ type Component struct {
 	DefaultEnabled bool
 	Profiles       []string
 	BaseWave       int
+	Namespace      string
 }
 
 type Registry struct{ components map[string]Component }
@@ -62,6 +63,9 @@ func New(components []Component) (*Registry, error) {
 	for _, component := range components {
 		if !identifier.MatchString(component.ID) || (component.Owner != Infrastructure && component.Owner != Bootstrap && component.Owner != GitOps) || (component.Status != Implemented && component.Status != Experimental && component.Status != Unavailable) || component.BaseWave < -1000 || component.BaseWave > 1000 {
 			return nil, errors.New("invalid component identity, ownership, status, or wave")
+		}
+		if component.Namespace != "" && (!identifier.MatchString(component.Namespace) || component.Owner != GitOps) {
+			return nil, errors.New("invalid GitOps component namespace")
 		}
 		if _, exists := registry.components[component.ID]; exists {
 			return nil, fmt.Errorf("duplicate component %s", component.ID)

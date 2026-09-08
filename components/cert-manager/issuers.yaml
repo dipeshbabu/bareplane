@@ -1,0 +1,10 @@
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+    bareplane.io/cluster: lab
+    bareplane.io/component: cert-manager
+  name: lab-selfsigned
+spec:
+  selfSigned: {}

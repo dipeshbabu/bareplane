@@ -22,6 +22,9 @@ func (c Config) PlatformSelection() platform.Selection {
 	if c.Spec.Features.GPU {
 		selection.Enabled = append(selection.Enabled, "gpu-scheduling")
 	}
+	if c.Spec.Certificates != nil {
+		selection.Enabled = append(selection.Enabled, "cert-manager")
+	}
 	if c.Spec.Features.Observability {
 		selection.Enabled = append(selection.Enabled, "observability")
 	}

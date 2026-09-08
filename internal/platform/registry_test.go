@@ -110,6 +110,8 @@ func TestCyclesUnknownReferencesInvalidMetadataAndOwnershipInversion(t *testing.
 		{{ID: "trailing-", Owner: GitOps, Status: Implemented}},
 		{{ID: "a", Owner: "unknown", Status: Implemented}},
 		{{ID: "a", Owner: GitOps, Status: "unknown"}},
+		{{ID: "a", Owner: GitOps, Status: Implemented, Namespace: "../unsafe"}},
+		{{ID: "a", Owner: Bootstrap, Status: Implemented, Namespace: "kube-system"}},
 		{{ID: "a", Owner: GitOps, Status: Implemented, Profiles: []string{"full"}}},
 		{{ID: "host", Owner: Bootstrap, Status: Implemented, Dependencies: []string{"a"}}, component("a")},
 	} {
