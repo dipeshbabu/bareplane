@@ -131,6 +131,19 @@ def exercise_sops(component, fixture):
     base_source = dict(repoURL=component.app['spec']['source']['repoURL'], targetRevision=component.revision,
                        path='examples/gitops/sops-argocd')
 
+    def diagnostics():
+        # Public identity/reason fields only; never publish logs or Pod specs.
+        try:
+            pods = api('get', 'pods', '-n', 'argocd', '-o', 'json').get('items', [])
+            print('Disposable SOPS pod readiness: ' + json.dumps([dict(name=pod['metadata']['name'],
+                phase=pod.get('status', {}).get('phase'), containers=[dict(name=container.get('name'),
+                ready=container.get('ready'), restarts=container.get('restartCount'),
+                waiting=container.get('state', {}).get('waiting', {}).get('reason'),
+                previousExit=container.get('lastState', {}).get('terminated', {}).get('exitCode'))
+                for container in pod.get('status', {}).get('containerStatuses', [])]) for pod in pods[:20]]), flush=True)
+        except (RuntimeError, KeyError, TypeError, subprocess.SubprocessError):
+            print('Disposable SOPS readiness diagnostics unavailable.', flush=True)
+
     def wait_application(name, source, healthy=True):
         deadline = time.monotonic() + 600
         while True:
@@ -150,6 +163,7 @@ def exercise_sops(component, fixture):
             if time.monotonic() >= deadline:
                 print('Disposable SOPS status: ' + json.dumps(dict(name=name, sync=status.get('sync', {}).get('status'),
                     health=status.get('health', {}).get('status'), conditions=sorted(conditions), phase=phase, compared=compared)), flush=True)
+                diagnostics()
                 raise RuntimeError('SOPS Argo acceptance did not reach its expected state')
             time.sleep(2)
 
@@ -229,7 +243,9 @@ def exercise_sops(component, fixture):
     unmanaged = api('create', '-f', '-', '-o', 'json', data=dict(apiVersion='v1', kind='Secret',
         metadata=dict(name='sample-pgp', namespace='sops-workloads'), type='Opaque', stringData=dict(password='unmanaged-disposable-value')))
     command('create', '-f', '-', data=application('pgp'))
-    wait_application('sops-pgp', secret_source('pgp'), healthy=False)
+    refused = wait_application('sops-pgp', secret_source('pgp'), healthy=False)
+    if 'SOPS refuses to adopt an existing unmanaged Secret' not in json.dumps(refused.get('status', {}).get('operationState', {})):
+        raise RuntimeError('Unmanaged SOPS Secret was not refused by the expected ownership policy')
     current = read_secret('pgp')
     if current['metadata']['uid'] != unmanaged['metadata']['uid'] or current['data'] != unmanaged['data']:
         raise RuntimeError('SOPS adopted an existing unmanaged Secret')

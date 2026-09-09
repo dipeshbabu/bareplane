@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -153,8 +154,14 @@ class SOPSRuntimeTests(unittest.TestCase):
         self.repository.mkdir()
         self.keys = self.root / 'keys'
         self.keys.mkdir()
-        self.sops = os.environ.get('BAREPLANE_TEST_SOPS_BINARY', 'sops')
-        self.keygen = os.environ.get('BAREPLANE_TEST_AGE_KEYGEN', 'age-keygen')
+        # Production generation deliberately drops the caller's PATH. Resolve
+        # fixture tools before entering that private environment (CI installs
+        # them in RUNNER_TEMP rather than /usr/local/bin).
+        self.sops = shutil.which(os.environ.get('BAREPLANE_TEST_SOPS_BINARY', 'sops'))
+        self.keygen = shutil.which(os.environ.get('BAREPLANE_TEST_AGE_KEYGEN', 'age-keygen'))
+        if not self.sops or not self.keygen:
+            raise RuntimeError('Pinned SOPS fixture tools are unavailable')
+        self.sops, self.keygen = str(Path(self.sops).resolve()), str(Path(self.keygen).resolve())
         self.secret = 'ephemeral-sops-test-' + secrets.token_hex(24)
         self.env = {'PATH': os.environ['PATH'], 'HOME': str(self.root), 'GNUPGHOME': str(self.root / 'gnupg')}
         (self.root / 'gnupg').mkdir(mode=0o700)
