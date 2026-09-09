@@ -16,6 +16,20 @@ def wait_for(predicate, message, timeout=240):
         time.sleep(2)
 
 
+def check_prometheus_rules(kubectl, rules):
+    # promtool creates and removes its own unique test_storage directory. The
+    # production root filesystem is read-only; keep this test's temporary data
+    # on the explicitly disposable, writable Prometheus data volume.
+    result = subprocess.run(kubectl + ['exec', '-i', 'deployment/bareplane-prometheus', '-n', 'observability', '--',
+                            '/bin/env', 'TMPDIR=/prometheus', '/bin/promtool', 'test', 'rules', '/dev/stdin'],
+                            input=rules, capture_output=True, timeout=90)
+    if result.returncode:
+        # These diagnostics contain only the checked-in synthetic rule vectors,
+        # not live scrape data, Secret values or controller logs.
+        print((result.stdout + result.stderr).decode(errors='replace')[-4000:], flush=True)
+        raise RuntimeError('Pinned Prometheus rule behavior differs from its reviewed contract')
+
+
 def run_observability_acceptance(kubectl, repository, work):
     component = ComponentAcceptance(kubectl, repository, 'observability')
     command, api = component.command, component.api
@@ -23,10 +37,7 @@ def run_observability_acceptance(kubectl, repository, work):
     identities = {name: component.deployment_identity(name) for name in ['bareplane-prometheus', 'kube-state-metrics']}
     command('exec', 'deployment/bareplane-prometheus', '-n', 'observability', '--', '/bin/promtool', 'check', 'config', '/etc/prometheus/prometheus.yml')
     rules = (repository / 'tests/ansible/observability_rules.yaml').read_bytes()
-    result = subprocess.run(kubectl + ['exec', '-i', 'deployment/bareplane-prometheus', '-n', 'observability', '--',
-                            '/bin/promtool', 'test', 'rules', '/dev/stdin'], input=rules, capture_output=True, timeout=90)
-    if result.returncode:
-        raise RuntimeError('Pinned Prometheus rule behavior differs from its reviewed contract')
+    check_prometheus_rules(kubectl, rules)
 
     def query(expression):
         path = '/api/v1/namespaces/observability/services/http:bareplane-prometheus:9090/proxy/api/v1/query?' + urlencode({'query': expression})
