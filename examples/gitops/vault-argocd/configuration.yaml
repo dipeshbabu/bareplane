@@ -37,8 +37,12 @@ data:
             if condition.status == "False" then return {status = "Degraded", message = "Vault Secret synchronization is unavailable; retained data is unchanged"} end
             if condition.status == "True" then
               local observed = (obj.metadata or {}).generation
-              local generation = tostring(observed or "") .. "-"
-              if type(observed) == "number" and observed >= 1 and string.sub(status.syncedResourceVersion or "", 1, string.len(generation)) == generation and status.refreshTime ~= nil then
+              local generation = tostring(observed or "")
+              local synced = status.syncedResourceVersion
+              -- Argo's default health sandbox has no string library. The lexical
+              -- interval (generation .. "-", generation .. ".") matches a nonempty
+              -- hash after the exact generation prefix ('-' immediately precedes '.').
+              if type(observed) == "number" and observed >= 1 and type(synced) == "string" and synced > generation .. "-" and synced < generation .. "." and type(status.refreshTime) == "string" and status.refreshTime ~= "" then
                 return {status = "Healthy", message = "Vault Secret generation has synchronized"}
               end
             end

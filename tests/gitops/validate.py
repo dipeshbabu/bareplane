@@ -78,9 +78,18 @@ def strict_schema(value):
     return value
 
 
+def restricted_lua():
+    lua = LuaRuntime(register_eval=False, register_builtins=False)
+    # Argo 3.5.2 opens base/table and a safe OS subset, not the string/math/io
+    # libraries. These health scripts require only base/table operations.
+    for name in ['string', 'math', 'io', 'os', 'debug', 'utf8', 'coroutine', 'package', 'require']:
+        lua.globals()[name] = None
+    return lua
+
+
 def validate_child_health(script):
     def assess(obj):
-        lua = LuaRuntime(register_eval=False, register_builtins=False)
+        lua = restricted_lua()
         # API JSON is a tree: remove Python fixture aliases before conversion.
         lua.globals().obj = lua.table_from(json.loads(json.dumps(obj)), recursive=True)
         return lua.execute(script)["status"]
@@ -262,15 +271,16 @@ def main():
         for kind in ['SecretStore', 'ExternalSecret']:
             script = vault_configmap['data']['resource.customizations.health.external-secrets.io_' + kind]
             for status, expected in [('True', 'Healthy'), ('False', 'Degraded'), ('Unknown', 'Progressing')]:
-                lua = LuaRuntime(register_eval=False, register_builtins=False)
+                lua = restricted_lua()
                 lua.globals().obj = lua.table_from(dict(metadata=dict(generation=2), status=dict(
                     conditions=[dict(type='Ready', status=status)], syncedResourceVersion='2-current', refreshTime='2026-09-09T00:00:00Z')), recursive=True)
                 assert lua.execute(script)['status'] == expected
             if kind == 'ExternalSecret':
-                lua = LuaRuntime(register_eval=False, register_builtins=False)
-                lua.globals().obj = lua.table_from(dict(metadata=dict(generation=3), status=dict(
-                    conditions=[dict(type='Ready', status='True')], syncedResourceVersion='2-old', refreshTime='2026-09-09T00:00:00Z')), recursive=True)
-                assert lua.execute(script)['status'] == 'Progressing'
+                for generation, version in [(3, '2-old'), (2, '20-other'), (20, '2-other'), (2, '2-'), (2, '2'), (2, {}), (None, '2-current')]:
+                    lua = restricted_lua()
+                    lua.globals().obj = lua.table_from(dict(metadata=dict(generation=generation), status=dict(
+                        conditions=[dict(type='Ready', status='True')], syncedResourceVersion=version, refreshTime='2026-09-09T00:00:00Z')), recursive=True)
+                    assert lua.execute(script)['status'] == 'Progressing'
         for obj in custom_resources:
             custom = custom_validators[obj['apiVersion'], obj['kind']]
             custom.validate(obj)
