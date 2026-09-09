@@ -22,6 +22,16 @@ def wait_for(predicate, message, timeout=300):
         time.sleep(2)
 
 
+def patch_application_source(component, uid, desired):
+    # Argo updates status/resourceVersion independently. Test the owned UID and
+    # exact source atomically, without replacing a stale full Application.
+    operations = [dict(op='test', path='/metadata/uid', value=uid),
+                  dict(op='test', path='/spec/source', value=component.app['spec']['source']),
+                  dict(op='replace', path='/spec/source', value=desired)]
+    component.api('patch', 'application', component.name, '-n', 'argocd', '--type=json', '-p', json.dumps(operations), '-o', 'json')
+    component.app['spec']['source'] = copy.deepcopy(desired)
+
+
 def run_vault_acceptance(kubectl, repository, work):
     component = ComponentAcceptance(kubectl, repository, 'vault')
     command, api = component.command, component.api
@@ -72,10 +82,7 @@ def run_vault_acceptance(kubectl, repository, work):
             return desired
 
         def update(ca='vault-ca', resync='updated'):
-            obj = api('get', 'application', component.name, '-n', 'argocd', '-o', 'json')
-            component.app['spec']['source'] = source(ca, resync)
-            obj['spec']['source'] = component.app['spec']['source']
-            api('replace', '-f', '-', '-o', 'json', data=obj)
+            patch_application_source(component, application_uid, source(ca, resync))
 
         def target():
             return api('get', 'secret', 'database', '-n', namespace, '-o', 'json')
@@ -107,6 +114,7 @@ def run_vault_acceptance(kubectl, repository, work):
 
         component.app['spec']['source'] = source()
         component.create()
+        application_uid = api('get', 'application', component.name, '-n', 'argocd', '-o', 'json')['metadata']['uid']
         wait_for(lambda: bool(api('get', 'namespace', 'vault-secrets', '--ignore-not-found', '-o', 'json')),
                  'Argo did not create its owned Vault operator namespace')
         command('create', '-f', '-', data=dict(apiVersion='cilium.io/v2', kind='CiliumNetworkPolicy',
@@ -198,9 +206,7 @@ def run_vault_acceptance(kubectl, repository, work):
             assert_retained(rotated)
             # Restore the declaration through its existing Argo owner, not by
             # adopting or manually writing the retained runtime Secret.
-            app = api('get', 'application', component.name, '-n', 'argocd', '-o', 'json')
-            app['operation'] = dict(sync=dict(revision=component.revision))
-            api('replace', '-f', '-', '-o', 'json', data=app)
+            update(resync='restore-declaration')
             component.wait_application()
             assert_retained(rotated)
             print('Argo-owned Vault integration passed real audience-bound JWT authentication, TLS trust, ownership refusal, rotation, revocation, unavailability and retained-data checks.', flush=True)
