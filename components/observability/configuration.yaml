@@ -1,0 +1,68 @@
+# Prometheus 3.14.0 (d7598b7141418fa35be2b5ec5d0fefb634199610); kube-state-metrics 2.20.0 (4ffeda2ef866b0fef372849825a803296483b336).
+# Curated by hack/vendor_observability.py; Apache-2.0.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bareplane-prometheus
+  namespace: observability
+  annotations:
+    bareplane.io/cluster: lab
+    bareplane.io/component: observability
+    argocd.argoproj.io/sync-wave: '-10'
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 30s
+      scrape_timeout: 10s
+      evaluation_interval: 30s
+    storage:
+      tsdb:
+        retention:
+          time: 24h
+          size: 1GB
+    rule_files:
+    - /etc/prometheus/rules.yml
+    scrape_configs:
+    - job_name: prometheus
+      static_configs:
+      - targets:
+        - 127.0.0.1:9090
+      sample_limit: 10000
+      body_size_limit: 10MB
+      label_limit: 30
+      label_name_length_limit: 128
+      label_value_length_limit: 256
+    - job_name: kube-state-metrics
+      static_configs:
+      - targets:
+        - kube-state-metrics.observability.svc:8080
+      sample_limit: 10000
+      body_size_limit: 10MB
+      label_limit: 30
+      label_name_length_limit: 128
+      label_value_length_limit: 256
+  rules.yml: |
+    groups:
+    - name: bareplane-health
+      rules:
+      - alert: BareplaneScrapeUnavailable
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: A baseline metrics target is unavailable
+      - alert: BareplaneNodeNotReady
+        expr: kube_node_status_condition{condition="Ready",status="true"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: A Kubernetes node is not Ready
+      - alert: BareplaneDeploymentUnavailable
+        expr: kube_deployment_spec_replicas > kube_deployment_status_replicas_available
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: A Deployment has fewer available replicas than requested

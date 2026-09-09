@@ -25,6 +25,10 @@ cert-manager is now available explicitly via `enabled: [cert-manager]` or the
 bootstrap-owned verified kubelet serving TLS as required dependencies. Its
 5,000-node sizing limit is validated only when it is selected.
 
+[Basic observability](observability.md) is available explicitly with Prometheus
+and kube-state-metrics. It requires acknowledgement of ephemeral history and
+does not implicitly introduce persistent storage, host agents or external access.
+
 [ExternalDNS](dns.md) is selected by Cloudflare or explicitly enabling
 `external-dns`, but controller rendering requires the full scoped automation
 contract. Manual DNS remains controller-free, and dry-run is the automation default.

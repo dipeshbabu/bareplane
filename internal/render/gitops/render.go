@@ -90,6 +90,11 @@ func Render(cfg config.Config) (map[string][]byte, error) {
 				return nil, err
 			}
 		}
+		if component.ID == "observability" {
+			if err := renderObservability(cfg, files); err != nil {
+				return nil, err
+			}
+		}
 	}
 	for _, component := range components {
 		if component.ID == "secrets-sops" {
