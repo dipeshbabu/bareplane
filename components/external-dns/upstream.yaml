@@ -1,0 +1,153 @@
+# ExternalDNS v0.22.0, Apache-2.0; curated by hack/vendor_external_dns.py.
+# Source commit: 994f908d4abdfe5fbf38f2f61613ed570432e43a
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: external-dns
+  annotations:
+    bareplane.io/cluster: "lab"
+    bareplane.io/component: external-dns
+    argocd.argoproj.io/sync-wave: '-30'
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: external-dns
+  namespace: external-dns
+  annotations:
+    bareplane.io/cluster: "lab"
+    bareplane.io/component: external-dns
+spec:
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: external-dns
+  template:
+    metadata:
+      labels:
+        app: external-dns
+      annotations:
+        bareplane.io/credentials-revision: "initial"
+    spec:
+      serviceAccountName: external-dns
+      containers:
+        - name: external-dns
+          image: registry.k8s.io/external-dns/external-dns:v0.22.0
+          args:
+            - --source=service
+            - --service-type-filter=LoadBalancer
+            - "--namespace=dns-workloads"
+            - --annotation-filter=bareplane.io/dns-managed=true
+            - --provider=cloudflare
+            - "--zone-id-filter=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            - "--domain-filter=apps.example.test"
+            - --registry=txt
+            - "--txt-owner-id=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            - --txt-prefix=bareplane-
+            - --policy=upsert-only
+            - --interval=1m
+            - --dry-run
+            - --cloudflare-dns-records-per-page=5000
+            - --batch-change-size=200
+            - --batch-change-interval=1s
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: CF_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: "cloudflare-api"
+                  key: "apiToken"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          ports:
+            - name: http
+              containerPort: 7979
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 2
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      nodeSelector:
+        kubernetes.io/os: linux
+  replicas: 1
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: bareplane-external-dns-reader
+  namespace: "dns-workloads"
+  annotations:
+    bareplane.io/existing-namespace: "dns-workloads"
+    bareplane.io/cluster: "lab"
+    bareplane.io/component: external-dns
+rules:
+  - apiGroups:
+      - ''
+    resources:
+      - services
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bareplane-external-dns-reader
+  namespace: "dns-workloads"
+  annotations:
+    bareplane.io/existing-namespace: "dns-workloads"
+    bareplane.io/cluster: "lab"
+    bareplane.io/component: external-dns
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: bareplane-external-dns-reader
+subjects:
+  - kind: ServiceAccount
+    name: external-dns
+    namespace: external-dns
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: external-dns
+  namespace: external-dns
+  annotations:
+    bareplane.io/cluster: "lab"
+    bareplane.io/component: external-dns

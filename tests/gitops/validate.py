@@ -187,6 +187,23 @@ def main():
         applications += metrics_apps
         custom_resources += [obj for obj in metrics_docs if obj['apiVersion'] == 'cert-manager.io/v1']
         documents += [obj for obj in metrics_docs if obj['apiVersion'] != 'cert-manager.io/v1']
+        dns_root = root / 'external-dns'
+        dns_root.mkdir()
+        dns_config = yaml.safe_load(CONFIG)
+        dns_config['metadata']['name'] = 'false'
+        dns_config['spec']['components']['disabled'].remove('external-dns')
+        dns_config['spec']['dns'] = dict(provider='cloudflare', automation=dict(
+            zoneID='a' * 32, zoneName='example.test', domain='apps.example.test', sourceNamespace='on', ownerID='b' * 32,
+            tokenSecret=dict(name='123', key='false', revision='2026-01-01')))
+        dns_path = dns_root / 'bareplane.yaml'
+        dns_path.write_text(yaml.safe_dump(dns_config), encoding='utf-8')
+        run([bareplane, 'gitops', 'render', str(dns_path)])
+        dns_export = dns_root / 'gitops'
+        documents += list(yaml.safe_load_all(run([kubectl, 'kustomize', str(dns_export / 'components/external-dns')])))
+        dns_apps = list(yaml.safe_load_all(run([kubectl, 'kustomize', str(dns_export / 'clusters/gitops-ci')])))
+        for app in dns_apps:
+            validator.validate(app)
+        applications += dns_apps
         for obj in custom_resources:
             custom = custom_validators[obj['apiVersion'], obj['kind']]
             custom.validate(obj)

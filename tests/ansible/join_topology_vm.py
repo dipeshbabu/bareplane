@@ -17,6 +17,7 @@ import yaml
 
 from cert_manager_acceptance import run_cert_manager_acceptance
 from metrics_server_acceptance import run_metrics_server_acceptance
+from dns_acceptance import run_dns_acceptance
 
 
 IMAGE_URL = 'https://cloud-images.ubuntu.com/noble/20260826/noble-server-cloudimg-amd64.img'
@@ -68,8 +69,9 @@ def main():
     recovery_mode = os.environ.get('BAREPLANE_TEST_BOOTSTRAP_RECOVERY') == '1'
     kubelet_tls_mode = os.environ.get('BAREPLANE_TEST_KUBELET_TLS') == '1'
     metrics_mode = os.environ.get('BAREPLANE_TEST_METRICS_SERVER') == '1'
+    dns_mode = os.environ.get('BAREPLANE_TEST_EXTERNAL_DNS') == '1'
     cert_manager_mode = os.environ.get('BAREPLANE_TEST_CERT_MANAGER') == '1' or metrics_mode
-    handoff_mode = os.environ.get('BAREPLANE_TEST_GITOPS_HANDOFF') == '1' or cert_manager_mode
+    handoff_mode = os.environ.get('BAREPLANE_TEST_GITOPS_HANDOFF') == '1' or cert_manager_mode or dns_mode
     argocd_mode = os.environ.get('BAREPLANE_TEST_ARGOCD_INSTALL') == '1' or handoff_mode
     single_mode = recovery_mode or argocd_mode
     guests = []
@@ -361,6 +363,8 @@ def main():
                             run_cert_manager_acceptance(kubectl, REPO, work)
                         if metrics_mode:
                             run_metrics_server_acceptance(kubectl, REPO, work, names)
+                        if dns_mode:
+                            run_dns_acceptance(kubectl, REPO, work)
                 if recovery_mode:
                     run([REPO / 'bin/bareplane', 'bootstrap', 'kubelet-tls', '--approve', 'lab', config_path])
                     run([REPO / 'bin/bareplane', 'bootstrap', 'diagnose', config_path])

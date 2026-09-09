@@ -78,7 +78,8 @@ type Features struct {
 }
 
 type DNS struct {
-	Provider string `yaml:"provider"`
+	Provider   string         `yaml:"provider"`
+	Automation *DNSAutomation `yaml:"automation,omitempty"`
 }
 
 type Secrets struct {
@@ -221,6 +222,7 @@ func (c Config) Validate() error {
 	if c.Spec.DNS.Provider != "cloudflare" && c.Spec.DNS.Provider != "manual" {
 		problems = append(problems, "spec.dns.provider must be cloudflare or manual")
 	}
+	problems = append(problems, validateDNSAutomation(c.Spec.DNS)...)
 	if c.Spec.Secrets.Provider != "vault" && c.Spec.Secrets.Provider != "sops" {
 		problems = append(problems, "spec.secrets.provider must be vault or sops")
 	}

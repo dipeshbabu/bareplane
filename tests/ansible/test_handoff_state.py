@@ -93,6 +93,40 @@ class NewComponentOwnershipTests(unittest.TestCase):
             with self.assertRaises(git.GitOpsError):
                 handoff.verify_new_component_absence(self, changed)
 
+    def test_dns_may_create_only_new_service_reader_permissions_in_an_existing_app_namespace(self):
+        raw = (ROOT / 'internal/render/gitops/assets/external-dns/upstream.yaml').read_bytes()
+        resources = list(yaml.safe_load_all(raw.replace(b'BAREPLANE_DNS_SOURCE_NAMESPACE', b'apps')))
+        namespace_exists = True
+        blocked = None
+        queries = []
+
+        class Client:
+            def json(self, *args):
+                queries.append(args)
+                if args[:3] == ('get', 'namespace', 'apps'):
+                    return {'metadata': {'uid': 'application-namespace'}} if namespace_exists else {}
+                return {'metadata': {'uid': 'foreign'}} if args[1:3] == blocked else {}
+
+        handoff.verify_new_component_absence(Client(), resources)
+        self.assertEqual(sum(args[:3] == ('get', 'namespace', 'apps') for args in queries), 1)
+        self.assertTrue(all(args[0] == 'get' for args in queries))
+        for kind in ['roles', 'rolebindings']:
+            blocked = (kind + '.rbac.authorization.k8s.io', 'bareplane-external-dns-reader')
+            with self.assertRaises(git.GitOpsError):
+                handoff.verify_new_component_absence(Client(), resources)
+        blocked = None
+        namespace_exists = False
+        with self.assertRaises(git.GitOpsError):
+            handoff.verify_new_component_absence(Client(), resources)
+        namespace_exists = True
+        for mutate in [lambda r: r['rules'][0]['resources'].append('secrets'),
+                       lambda r: r['rules'][0]['verbs'].append('create'),
+                       lambda r: r['metadata'].update(name='other')]:
+            changed = copy.deepcopy(resources)
+            mutate(next(obj for obj in changed if obj['kind'] == 'Role'))
+            with self.assertRaises(git.GitOpsError):
+                handoff.verify_new_component_absence(Client(), changed)
+
 
 class HandoffPlanTests(unittest.TestCase):
     @classmethod
