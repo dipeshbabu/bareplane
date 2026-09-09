@@ -6,6 +6,8 @@ The optional [`spec.components` selection](component-selection.md) enables or di
 
 The optional [`spec.observability` baseline](observability.md) requires explicit ephemeral storage and bounds metrics retention and topology size.
 
+The optional [`spec.storage` inventory](storage.md) selects retained static local volumes with fixed derived paths and read-only node checks. It does not authorize disk formatting or implicit data adoption.
+
 The optional [`spec.secrets.sops` integration](sops.md) accepts only operator key references and an explicit namespace allowlist; no private key or secret value belongs in this configuration.
 
 The advanced [`spec.secrets.vault` integration](vault.md) references an externally managed TLS Vault and scoped Kubernetes auth role. It contains no tokens or secret values and does not deploy a Vault cluster.

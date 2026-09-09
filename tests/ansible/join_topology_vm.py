@@ -21,6 +21,7 @@ from dns_acceptance import run_dns_acceptance
 from sops_acceptance import run_sops_acceptance
 from observability_acceptance import run_observability_acceptance
 from vault_acceptance import run_vault_acceptance
+from storage_acceptance import run_storage_acceptance
 
 
 IMAGE_URL = 'https://cloud-images.ubuntu.com/noble/20260826/noble-server-cloudimg-amd64.img'
@@ -76,8 +77,9 @@ def main():
     sops_mode = os.environ.get('BAREPLANE_TEST_SOPS_DELIVERY') == '1'
     observability_mode = os.environ.get('BAREPLANE_TEST_OBSERVABILITY') == '1'
     vault_mode = os.environ.get('BAREPLANE_TEST_VAULT') == '1'
+    storage_mode = os.environ.get('BAREPLANE_TEST_LOCAL_STORAGE') == '1'
     cert_manager_mode = os.environ.get('BAREPLANE_TEST_CERT_MANAGER') == '1' or metrics_mode
-    handoff_mode = os.environ.get('BAREPLANE_TEST_GITOPS_HANDOFF') == '1' or cert_manager_mode or dns_mode or sops_mode or vault_mode or observability_mode
+    handoff_mode = os.environ.get('BAREPLANE_TEST_GITOPS_HANDOFF') == '1' or cert_manager_mode or dns_mode or sops_mode or vault_mode or observability_mode or storage_mode
     argocd_mode = os.environ.get('BAREPLANE_TEST_ARGOCD_INSTALL') == '1' or handoff_mode
     single_mode = recovery_mode or argocd_mode
     guests = []
@@ -125,7 +127,7 @@ def main():
             ))))
             run(['cloud-localds', '--network-config=' + str(vm / 'network-config'), vm / 'seed.img', vm / 'user-data', vm / 'meta-data'])
             run(['qemu-img', 'create', '-f', 'qcow2', '-F', 'qcow2', '-b', image, vm / 'disk.qcow2', '24G'])
-            if recovery_mode:
+            if recovery_mode or storage_mode:
                 run(['qemu-img', 'create', '-f', 'qcow2', vm / 'application-data.qcow2', '64M'])
             tap = 'bp-tap' + str(index)
             run(['sudo', 'ip', 'tuntap', 'add', 'dev', tap, 'mode', 'tap', 'user', os.environ['USER']])
@@ -139,7 +141,7 @@ def main():
                 '-drive', f'file={vm / "seed.img"},if=virtio,format=raw',
                 '-netdev', f'tap,id=net0,ifname={tap},script=no,downscript=no',
                 '-device', f'virtio-net-pci,netdev=net0,mac={mac}',
-                *(['-drive', f'file={vm / "application-data.qcow2"},if=virtio,format=qcow2'] if recovery_mode else []),
+                *(['-drive', f'file={vm / "application-data.qcow2"},if=virtio,format=qcow2'] if recovery_mode or storage_mode else []),
             ], stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT))
 
         def ssh(name, command, **kwargs):
@@ -170,7 +172,7 @@ def main():
                     if time.monotonic() >= deadline:
                         raise RuntimeError('Disposable guest did not synchronize its clock: ' + name)
                     time.sleep(2)
-            if recovery_mode:
+            if recovery_mode or storage_mode:
                 # This exact empty 64 MiB disk was created above for this guest.
                 ssh(name, 'test "$(blockdev --getsize64 /dev/vdc)" = 67108864 && ! blkid /dev/vdc')
                 ssh(name, 'mkfs.ext4 -q /dev/vdc && mkdir /bareplane-user-data && mount /dev/vdc /bareplane-user-data')
@@ -377,6 +379,8 @@ def main():
                             run_observability_acceptance(kubectl, REPO, work)
                         if vault_mode:
                             run_vault_acceptance(kubectl, REPO, work)
+                        if storage_mode:
+                            run_storage_acceptance(kubectl, REPO, work, ssh)
                 if recovery_mode:
                     run([REPO / 'bin/bareplane', 'bootstrap', 'kubelet-tls', '--approve', 'lab', config_path])
                     run([REPO / 'bin/bareplane', 'bootstrap', 'diagnose', config_path])
