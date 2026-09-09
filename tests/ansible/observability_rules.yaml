@@ -1,0 +1,43 @@
+rule_files:
+  - /etc/prometheus/rules.yml
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'up{job="kube-state-metrics",instance="fixture"}'
+        values: '0+0x6'
+      - series: 'kube_node_status_condition{condition="Ready",status="true",node="fixture"}'
+        values: '0+0x6'
+      - series: 'kube_deployment_spec_replicas{namespace="fixture",deployment="app"}'
+        values: '1+0x6'
+      - series: 'kube_deployment_status_replicas_available{namespace="fixture",deployment="app"}'
+        values: '0+0x6'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: BareplaneScrapeUnavailable
+        exp_alerts:
+          - exp_labels:
+              job: kube-state-metrics
+              instance: fixture
+              severity: warning
+            exp_annotations:
+              summary: A baseline metrics target is unavailable
+      - eval_time: 5m
+        alertname: BareplaneNodeNotReady
+        exp_alerts:
+          - exp_labels:
+              node: fixture
+              condition: Ready
+              status: "true"
+              severity: warning
+            exp_annotations:
+              summary: A Kubernetes node is not Ready
+      - eval_time: 5m
+        alertname: BareplaneDeploymentUnavailable
+        exp_alerts:
+          - exp_labels:
+              namespace: fixture
+              deployment: app
+              severity: warning
+            exp_annotations:
+              summary: A Deployment has fewer available replicas than requested

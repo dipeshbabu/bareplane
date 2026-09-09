@@ -28,18 +28,19 @@ type Metadata struct {
 }
 
 type Spec struct {
-	Domain       string              `yaml:"domain"`
-	Provider     Provider            `yaml:"provider"`
-	Nodes        []NodeGroup         `yaml:"nodes"`
-	Bootstrap    *BootstrapConfig    `yaml:"bootstrap,omitempty"`
-	Kubernetes   *KubernetesConfig   `yaml:"kubernetes,omitempty"`
-	GitOps       *GitOpsConfig       `yaml:"gitops,omitempty"`
-	Components   *ComponentSelection `yaml:"components,omitempty"`
-	Certificates *CertificateConfig  `yaml:"certificates,omitempty"`
-	Features     Features            `yaml:"features"`
-	Profiles     []string            `yaml:"profiles"`
-	DNS          DNS                 `yaml:"dns"`
-	Secrets      Secrets             `yaml:"secrets"`
+	Domain        string               `yaml:"domain"`
+	Provider      Provider             `yaml:"provider"`
+	Nodes         []NodeGroup          `yaml:"nodes"`
+	Bootstrap     *BootstrapConfig     `yaml:"bootstrap,omitempty"`
+	Kubernetes    *KubernetesConfig    `yaml:"kubernetes,omitempty"`
+	GitOps        *GitOpsConfig        `yaml:"gitops,omitempty"`
+	Components    *ComponentSelection  `yaml:"components,omitempty"`
+	Certificates  *CertificateConfig   `yaml:"certificates,omitempty"`
+	Observability *ObservabilityConfig `yaml:"observability,omitempty"`
+	Features      Features             `yaml:"features"`
+	Profiles      []string             `yaml:"profiles"`
+	DNS           DNS                  `yaml:"dns"`
+	Secrets       Secrets              `yaml:"secrets"`
 }
 
 type Provider struct {
@@ -164,6 +165,7 @@ func (c Config) Validate() error {
 	problems = append(problems, validateCertificates(c.Spec.Certificates)...)
 	problems = append(problems, c.validateMetricsSizing()...)
 	problems = append(problems, c.validateSOPS()...)
+	problems = append(problems, c.validateObservability()...)
 	problems = append(problems, c.validateVault()...)
 
 	if len(c.Spec.Nodes) == 0 {

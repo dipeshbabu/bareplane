@@ -25,7 +25,7 @@ func (c Config) PlatformSelection() platform.Selection {
 	if c.Spec.Certificates != nil {
 		selection.Enabled = append(selection.Enabled, "cert-manager")
 	}
-	if c.Spec.Features.Observability {
+	if c.Spec.Features.Observability || c.Spec.Observability != nil {
 		selection.Enabled = append(selection.Enabled, "observability")
 	}
 	if c.Spec.DNS.Provider == "cloudflare" {

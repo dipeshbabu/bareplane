@@ -240,6 +240,25 @@ def main():
         for app in sops_apps:
             validator.validate(app)
         applications += sops_apps
+        observability_root = root / 'observability'
+        observability_root.mkdir()
+        observability_config = yaml.safe_load((Path(__file__).resolve().parents[2] / 'examples/observability-fixture.yaml').read_bytes())
+        observability_config['metadata']['name'] = 'false'
+        observability_config['spec']['observability']['retentionHours'] = 48
+        observability_path = observability_root / 'bareplane.yaml'
+        observability_path.write_text(yaml.safe_dump(observability_config), encoding='utf-8')
+        run([bareplane, 'gitops', 'render', str(observability_path)])
+        observability_export = observability_root / 'gitops'
+        observability_docs = list(yaml.safe_load_all(run([kubectl, 'kustomize', str(observability_export / 'components/observability')])))
+        documents += observability_docs
+        observability_apps = list(yaml.safe_load_all(run([kubectl, 'kustomize', str(observability_export / observability_config['spec']['gitops']['rootPath'])])))
+        for app in observability_apps:
+            validator.validate(app)
+        applications += observability_apps
+        prometheus_cm = next(obj for obj in observability_docs if obj['kind'] == 'ConfigMap')
+        prometheus_config = yaml.safe_load(prometheus_cm['data']['prometheus.yml'])
+        assert prometheus_config['storage']['tsdb']['retention'] == dict(time='48h', size='1GB')
+        assert len(prometheus_config['scrape_configs']) == 2 and 'remote_write' not in prometheus_config
         vault_root = root / 'vault'
         vault_root.mkdir()
         vault_config = yaml.safe_load((Path(__file__).resolve().parents[2] / 'examples/vault-fixture.yaml').read_bytes())
