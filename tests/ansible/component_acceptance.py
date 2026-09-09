@@ -104,11 +104,17 @@ class ComponentAcceptance:
                             'missing-file': 'no such file', 'invalid-flag': 'unknown flag'}
                 print('Disposable Metrics Server diagnostic categories: ' + json.dumps([name for name, pattern in patterns.items() if pattern in log]), flush=True)
             if self.namespace == 'external-dns':
+                deployment = self.api('get', 'deployment', 'external-dns', '-n', self.namespace, '-o', 'json')
+                args = deployment['spec']['template']['spec']['containers'][0].get('args', [])
+                print('Disposable DNS apply mode: ' + json.dumps(dict(dryRun='--dry-run' in args)), flush=True)
                 log = self.command('logs', 'deployment/external-dns', '-n', self.namespace, '--tail=40').decode(errors='replace').lower()
                 patterns = {'invalid-flag': 'unknown long flag', 'unexpected-argument': 'unexpected', 'permission-denied': 'permission denied',
                             'kubernetes-forbidden': 'forbidden', 'request-timeout': 'timeout', 'missing-credentials': 'credentials are not configured',
                             'cloudflare-refused': 'refused', 'missing-kubeconfig': 'kubeconfig', 'no-zone': 'no hosted zone',
-                            'cache-not-synced': 'cache to sync', 'read-only-filesystem': 'read-only file system'}
+                            'cache-not-synced': 'cache to sync', 'read-only-filesystem': 'read-only file system',
+                            'no-changes': 'all records are already up to date', 'planned-changes': 'changing record',
+                            'failed-batch': 'batch dns operation failed', 'failed-write': 'failed to submit',
+                            'record-conflict': 'conflict', 'endpoint-generation': 'endpoints generated from service'}
                 print('Disposable DNS diagnostic categories: ' + json.dumps([name for name, pattern in patterns.items() if pattern in log]), flush=True)
         except (RuntimeError, KeyError, TypeError, subprocess.SubprocessError):
             print('Disposable readiness diagnostics unavailable; no raw response was exposed.', flush=True)

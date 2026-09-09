@@ -22,9 +22,24 @@ def wait_for(predicate, message, timeout=180):
 
 def run_dns_acceptance(kubectl, repository, work):
     component = ComponentAcceptance(kubectl, repository, 'external-dns')
+    model = FakeCloudflare()
+    try:
+        exercise_dns(component, model, repository)
+    except Exception:
+        # Counts and fixed reason categories only; never publish request bodies,
+        # authentication values, Secret objects or unfiltered controller logs.
+        with model.lock:
+            print('Disposable DNS provider audit: ' + json.dumps(dict(
+                reads=sum(request['method'] == 'GET' for request in model.requests),
+                mutations=len(model.mutations), operations=len(model.operations),
+                records=len(model.records), denials=model.denials)), flush=True)
+        component.readiness_diagnostics()
+        raise
+
+
+def exercise_dns(component, model, repository):
     command, api = component.command, component.api
     source_namespace = 'dns-workloads'
-    model = FakeCloudflare()
     model.seed('unowned.apps.example.test', 'A', '192.0.2.90')
     model.seed('foreign.apps.example.test', 'A', '192.0.2.90')
     documents = list(yaml.safe_load_all((repository / 'components/external-dns/upstream.yaml').read_bytes()))
