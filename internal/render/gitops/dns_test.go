@@ -23,6 +23,53 @@ func dnsFixture(t *testing.T) config.Config {
 	return cfg
 }
 
+func TestDNSTemplateLineEndingsDoNotChangeCommentsOrOwnershipBytes(t *testing.T) {
+	data, err := assets.ReadFile("assets/external-dns/upstream.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lf := bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
+	inputs := map[string][]byte{
+		"lf":    lf,
+		"crlf":  bytes.ReplaceAll(lf, []byte("\n"), []byte("\r\n")),
+		"mixed": bytes.Replace(lf, []byte("\n"), []byte("\r\n"), 2),
+	}
+	for _, mode := range []string{"", "dry-run", "apply"} {
+		cfg := dnsFixture(t)
+		cfg.Metadata.Name = "false"
+		cfg.Spec.DNS.Automation.Mode = mode
+		cfg.Spec.DNS.Automation.SourceNamespace = "on"
+		cfg.Spec.DNS.Automation.TokenSecret = config.DNSSecretReference{Name: "123", Key: "false", Revision: "2026-01-01"}
+		expected, err := renderDNSTemplate(cfg, lf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.HasPrefix(expected, lf[:bytes.Index(lf, []byte("apiVersion:"))]) {
+			t.Fatal("DNS provenance comments changed")
+		}
+		for name, input := range inputs {
+			t.Run(mode+"/"+name, func(t *testing.T) {
+				before := bytes.Clone(input)
+				actual, err := renderDNSTemplate(cfg, input)
+				if err != nil || !bytes.Equal(actual, expected) {
+					t.Fatal("checkout line endings changed the DNS export", err)
+				}
+				if !bytes.Equal(input, before) {
+					t.Fatal("renderer modified source bytes")
+				}
+			})
+		}
+	}
+}
+
+func TestDNSTemplateRefusalReturnsNoPartialOutput(t *testing.T) {
+	for _, data := range []string{"invalid: [", "value: BAREPLANE_UNKNOWN\r\n"} {
+		if output, err := renderDNSTemplate(dnsFixture(t), []byte(data)); err == nil || output != nil {
+			t.Fatal("invalid template returned a partial payload")
+		}
+	}
+}
+
 func TestDNSPayloadIsPinnedServiceOnlyAndDefaultsToDryRun(t *testing.T) {
 	data, err := assets.ReadFile("assets/external-dns/upstream.yaml")
 	if err != nil {
