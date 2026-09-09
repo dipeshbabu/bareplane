@@ -37,6 +37,7 @@ type Spec struct {
 	Components    *ComponentSelection  `yaml:"components,omitempty"`
 	Certificates  *CertificateConfig   `yaml:"certificates,omitempty"`
 	Observability *ObservabilityConfig `yaml:"observability,omitempty"`
+	Storage       *StorageConfig       `yaml:"storage,omitempty"`
 	Features      Features             `yaml:"features"`
 	Profiles      []string             `yaml:"profiles"`
 	DNS           DNS                  `yaml:"dns"`
@@ -167,6 +168,7 @@ func (c Config) Validate() error {
 	problems = append(problems, c.validateSOPS()...)
 	problems = append(problems, c.validateObservability()...)
 	problems = append(problems, c.validateVault()...)
+	problems = append(problems, c.validateStorage()...)
 
 	if len(c.Spec.Nodes) == 0 {
 		problems = append(problems, "spec.nodes must contain at least one node group")
