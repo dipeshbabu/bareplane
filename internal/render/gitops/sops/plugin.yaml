@@ -1,0 +1,10 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ConfigManagementPlugin
+metadata:
+  name: bareplane-sops
+spec:
+  version: v1
+  generate:
+    command: [/usr/bin/python3, -I, /home/argocd/cmp-server/config/generate.py]
+  preserveFileMode: false
+  provideGitCreds: false

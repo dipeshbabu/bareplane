@@ -83,7 +83,8 @@ type DNS struct {
 }
 
 type Secrets struct {
-	Provider string `yaml:"provider"`
+	Provider string      `yaml:"provider"`
+	SOPS     *SOPSConfig `yaml:"sops,omitempty"`
 }
 
 type ValidationError struct {
@@ -161,6 +162,7 @@ func (c Config) Validate() error {
 	problems = append(problems, c.validateComponents()...)
 	problems = append(problems, validateCertificates(c.Spec.Certificates)...)
 	problems = append(problems, c.validateMetricsSizing()...)
+	problems = append(problems, c.validateSOPS()...)
 
 	if len(c.Spec.Nodes) == 0 {
 		problems = append(problems, "spec.nodes must contain at least one node group")

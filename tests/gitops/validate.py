@@ -204,6 +204,33 @@ def main():
         for app in dns_apps:
             validator.validate(app)
         applications += dns_apps
+        sops_root = root / 'sops'
+        sops_root.mkdir()
+        sops_config = yaml.safe_load(CONFIG)
+        sops_config['metadata']['name'] = 'false'
+        sops_config['spec']['components']['disabled'].remove('secrets-sops')
+        sops_config['spec']['secrets']['sops'] = dict(ageKey=dict(name='bareplane-sops-age', key='false'),
+            pgpKey=dict(name='bareplane-sops-pgp', key='private.asc'),
+            pgpPassphrase=dict(name='bareplane-sops-pass', key='passphrase'), namespaces=['on', 'workloads'], revision='123')
+        sops_path = sops_root / 'bareplane.yaml'
+        sops_path.write_text(yaml.safe_dump(sops_config), encoding='utf-8')
+        run([bareplane, 'gitops', 'render', str(sops_path)])
+        sops_export = sops_root / 'gitops'
+        sops_argo = list(yaml.safe_load_all(run([kubectl, 'kustomize', str(sops_export / 'components/argocd')])))
+        assert len(sops_argo) == 38, 'SOPS changed the cold Argo resource inventory'
+        repo_server = next(obj for obj in sops_argo if obj['kind'] == 'Deployment' and obj['metadata']['name'] == 'argocd-repo-server')
+        pod = repo_server['spec']['template']['spec']
+        assert pod['automountServiceAccountToken'] is False
+        assert len(pod['containers']) == 2
+        sidecar = next(obj for obj in pod['containers'] if obj['name'] == 'bareplane-sops')
+        assert sidecar['command'] == ['/var/run/argocd/argocd-cmp-server']
+        assert next(mount for mount in sidecar['volumeMounts'] if mount['mountPath'] == '/tmp')['name'] == 'sops-tmp'
+        documents += sops_argo
+        documents += list(yaml.safe_load_all(run([kubectl, 'kustomize', str(sops_export / 'components/secrets-sops')])))
+        sops_apps = list(yaml.safe_load_all(run([kubectl, 'kustomize', str(sops_export / 'clusters/gitops-ci')])))
+        for app in sops_apps:
+            validator.validate(app)
+        applications += sops_apps
         for obj in custom_resources:
             custom = custom_validators[obj['apiVersion'], obj['kind']]
             custom.validate(obj)

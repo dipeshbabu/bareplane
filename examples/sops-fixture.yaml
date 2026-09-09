@@ -1,0 +1,41 @@
+apiVersion: bareplane.io/v1alpha1
+kind: BareplaneCluster
+metadata:
+  name: lab
+spec:
+  domain: lab.example.com
+  provider:
+    type: proxmox
+    endpoint: https://proxmox.example.com:8006
+  nodes:
+    - name: control
+      role: control-plane
+      count: 1
+      cpu: 2
+      memoryGB: 4
+      diskGB: 24
+  gitops:
+    repoURL: https://github.com/dipeshbabu/bareplane.git
+    revision: main
+    rootPath: examples/gitops/secrets-sops-root
+  features:
+    observability: false
+    gpu: false
+  profiles: [minimal]
+  components:
+    disabled: [metrics-server, cert-manager, observability, external-dns, storage, vault]
+  dns:
+    provider: manual
+  secrets:
+    provider: sops
+    sops:
+      ageKey:
+        name: bareplane-sops-age
+        key: keys.txt
+      pgpKey:
+        name: bareplane-sops-pgp
+        key: private.asc
+      pgpPassphrase:
+        name: bareplane-sops-passphrase
+        key: passphrase
+      namespaces: [sops-workloads]

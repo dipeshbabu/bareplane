@@ -34,6 +34,9 @@ func (c Config) PlatformSelection() platform.Selection {
 	if c.Spec.Secrets.Provider == "vault" {
 		selection.Enabled = append(selection.Enabled, "vault")
 	}
+	if c.Spec.Secrets.SOPS != nil {
+		selection.Enabled = append(selection.Enabled, "secrets-sops")
+	}
 	return selection
 }
 

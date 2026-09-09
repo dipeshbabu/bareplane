@@ -54,6 +54,15 @@ class NewComponentOwnershipTests(unittest.TestCase):
         self.assertIn(('get', 'Namespace', 'cert-manager', '--ignore-not-found', '-o', 'json'), self.observed)
         self.assertEqual(sum(args[1] == 'CustomResourceDefinition' for args in self.observed), 6)
 
+    def test_sops_admission_policy_and_binding_must_both_be_absent(self):
+        resources = list(yaml.safe_load_all((ROOT / 'components/secrets-sops/ownership.yaml').read_bytes()))
+        handoff.verify_new_component_absence(self, resources)
+        self.assertEqual({args[1] for args in self.observed}, {'ValidatingAdmissionPolicy', 'ValidatingAdmissionPolicyBinding'})
+        for resource in resources:
+            self.existing = (resource['kind'], resource['metadata']['name'])
+            with self.subTest(kind=resource['kind']), self.assertRaises(git.GitOpsError):
+                handoff.verify_new_component_absence(self, resources)
+
     def test_existing_namespace_crd_rbac_or_webhook_is_never_adopted(self):
         for resource in self.resources:
             if resource['kind'] not in {'Namespace', 'CustomResourceDefinition', 'ClusterRole', 'ClusterRoleBinding',

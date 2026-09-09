@@ -329,7 +329,8 @@ def verify_new_component_absence(client, resources):
     """Cold handoff cannot adopt existing platform namespaces or cluster objects."""
     namespaces = {obj['metadata']['name'] for obj in resources if obj['kind'] == 'Namespace'}
     cluster_kinds = {'Namespace', 'CustomResourceDefinition', 'ClusterRole', 'ClusterRoleBinding',
-                     'MutatingWebhookConfiguration', 'ValidatingWebhookConfiguration', 'APIService'}
+                     'MutatingWebhookConfiguration', 'ValidatingWebhookConfiguration', 'APIService',
+                     'ValidatingAdmissionPolicy', 'ValidatingAdmissionPolicyBinding'}
     declared_custom = {(obj['spec']['group'], version['name'], obj['spec']['names']['kind']): obj['spec']['scope']
                        for obj in resources if obj['kind'] == 'CustomResourceDefinition' for version in obj['spec']['versions']}
     dns_sources = []

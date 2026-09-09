@@ -4,6 +4,8 @@ The optional [`spec.gitops` contract](gitops.md) defines a public HTTPS reposito
 
 The optional [`spec.components` selection](component-selection.md) enables or disables known registry IDs without overriding required dependencies, ownership, or availability checks.
 
+The optional [`spec.secrets.sops` integration](sops.md) accepts only operator key references and an explicit namespace allowlist; no private key or secret value belongs in this configuration.
+
 Bareplane uses a single versioned `bareplane.yaml` file as the user-facing source of intent.
 
 ## Initialize
