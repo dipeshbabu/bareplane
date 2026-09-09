@@ -13,9 +13,9 @@ class ComponentAcceptance:
     def __init__(self, kubectl, repository, component):
         if os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('BAREPLANE_DISPOSABLE_VM') != '1':
             raise RuntimeError('Component acceptance is restricted to disposable GitHub runners')
-        if component not in {'cert-manager', 'metrics-server', 'external-dns', 'secrets-sops'}:
+        if component not in {'cert-manager', 'metrics-server', 'external-dns', 'secrets-sops', 'vault'}:
             raise RuntimeError('Unknown disposable component fixture')
-        self.kubectl, self.namespace, self.name = kubectl, component, 'lab-' + component
+        self.kubectl, self.namespace, self.name = kubectl, 'vault-secrets' if component == 'vault' else component, 'lab-' + component
         self.revision = os.environ.get('BAREPLANE_TEST_GIT_REF', '')
         source_repo = os.environ.get('BAREPLANE_TEST_GIT_REPO', '')
         if not re.fullmatch('[0-9a-f]{40}', self.revision) or not re.fullmatch(r'https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\.git', source_repo):

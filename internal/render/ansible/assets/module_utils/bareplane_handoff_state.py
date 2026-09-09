@@ -325,6 +325,54 @@ def verify_cilium_excluded(client, applications):
             require(not owned, 'An Argo Application claims bootstrap-owned Cilium resources')
 
 
+def verify_vault_workload_resource(client, obj, namespace, controller_class, declared_custom):
+    """Permit only new, scoped Vault resources in an explicitly existing namespace."""
+    kind, metadata = obj['kind'], obj['metadata']
+    rules = [
+        dict(apiGroups=['external-secrets.io'], resources=['externalsecrets', 'secretstores'], verbs=['get', 'list', 'watch', 'update', 'patch']),
+        dict(apiGroups=['external-secrets.io'], resources=['externalsecrets/status', 'secretstores/status'], verbs=['get', 'update', 'patch']),
+        dict(apiGroups=['generators.external-secrets.io'], resources=['generatorstates'], verbs=['get', 'list', 'watch']),
+        dict(apiGroups=[''], resources=['secrets'], verbs=['get', 'list', 'watch', 'create', 'update', 'patch']),
+        dict(apiGroups=[''], resources=['serviceaccounts'], verbs=['get', 'list', 'watch']),
+        dict(apiGroups=[''], resources=['serviceaccounts/token'], resourceNames=['bareplane-vault-reader'], verbs=['create']),
+        dict(apiGroups=[''], resources=['events'], verbs=['create', 'patch']),
+    ]
+    role = dict(apiGroup='rbac.authorization.k8s.io', kind='Role', name='bareplane-vault-controller')
+    subject = [dict(kind='ServiceAccount', name='bareplane-vault', namespace='vault-secrets')]
+    native = ((kind == 'Role' and obj['apiVersion'] == 'rbac.authorization.k8s.io/v1'
+               and metadata['name'] == 'bareplane-vault-controller' and obj.get('rules') == rules)
+              or (kind == 'RoleBinding' and obj['apiVersion'] == 'rbac.authorization.k8s.io/v1'
+                  and metadata['name'] == 'bareplane-vault-controller' and obj.get('roleRef') == role and obj.get('subjects') == subject)
+              or (kind == 'ServiceAccount' and obj['apiVersion'] == 'v1' and metadata['name'] == 'bareplane-vault-reader'
+                  and obj.get('automountServiceAccountToken') is False and not obj.get('secrets')))
+    if native:
+        resource = 'serviceaccounts' if kind == 'ServiceAccount' else kind.lower() + 's.rbac.authorization.k8s.io'
+        require(not client.json('get', resource, metadata['name'], '-n', namespace, '--ignore-not-found', '-o', 'json'),
+                'An existing Vault workload identity or binding blocks initial handoff')
+        return
+    require(obj['apiVersion'] == 'external-secrets.io/v1' and kind in {'SecretStore', 'ExternalSecret'}
+            and declared_custom.get(('external-secrets.io', 'v1', kind)) == 'Namespaced',
+            'Vault workload resources exceed their reviewed namespace contract')
+    spec = obj.get('spec', {})
+    if kind == 'SecretStore':
+        require(metadata['name'] == controller_class and spec.get('controller') == controller_class
+                and set(spec.get('provider', {})) == {'vault'}
+                and spec['provider']['vault'].get('auth', {}).get('kubernetes', {}).get('serviceAccountRef', {}).get('name') == 'bareplane-vault-reader',
+                'Vault Store differs from its scoped authentication contract')
+    else:
+        target = spec.get('target', {})
+        labels = target.get('template', {}).get('metadata', {}).get('labels', {})
+        require(spec.get('secretStoreRef') == dict(kind='SecretStore', name=controller_class)
+                and target.get('creationPolicy') == 'Orphan' and target.get('deletionPolicy') == 'Retain'
+                and isinstance(target.get('name'), str) and re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', target['name'])
+                and labels.get('bareplane.io/vault-managed') == 'true' and labels.get('bareplane.io/vault-source') == metadata['name'],
+                'Vault Secret exceeds its retained, scoped destination contract')
+        require(not client.json('get', 'secrets', target['name'], '-n', namespace, '--ignore-not-found', '-o', 'json'),
+                'An existing Vault target Secret blocks initial handoff')
+    # These custom resources cannot pre-exist when their declared CRDs are
+    # absent; the outer read-only pass verifies all CRDs before root creation.
+
+
 def verify_new_component_absence(client, resources):
     """Cold handoff cannot adopt existing platform namespaces or cluster objects."""
     namespaces = {obj['metadata']['name'] for obj in resources if obj['kind'] == 'Namespace'}
@@ -334,11 +382,17 @@ def verify_new_component_absence(client, resources):
     declared_custom = {(obj['spec']['group'], version['name'], obj['spec']['names']['kind']): obj['spec']['scope']
                        for obj in resources if obj['kind'] == 'CustomResourceDefinition' for version in obj['spec']['versions']}
     dns_sources = []
+    vault_sources, vault_classes = [], []
     for obj in resources:
         if obj['kind'] == 'Deployment' and obj['metadata']['name'] == 'external-dns' and obj['metadata'].get('namespace') == 'external-dns':
             for container in obj['spec']['template']['spec']['containers']:
                 if container['name'] == 'external-dns':
                     dns_sources += [arg.removeprefix('--namespace=') for arg in container.get('args', []) if arg.startswith('--namespace=')]
+        if obj['kind'] == 'Deployment' and obj['metadata']['name'] == 'bareplane-vault' and obj['metadata'].get('namespace') == 'vault-secrets':
+            for container in obj['spec']['template']['spec']['containers']:
+                if container['name'] == 'external-secrets':
+                    vault_sources += [arg.removeprefix('--namespace=') for arg in container.get('args', []) if arg.startswith('--namespace=')]
+                    vault_classes += [arg.removeprefix('--controller-class=') for arg in container.get('args', []) if arg.startswith('--controller-class=')]
     verified_source_namespaces = set()
     for obj in resources:
         kind, metadata = obj['kind'], obj['metadata']
@@ -347,6 +401,20 @@ def verify_new_component_absence(client, resources):
                     'An existing unmanaged platform resource blocks initial handoff: ' + kind + '/' + metadata['name'])
         else:
             namespace = metadata.get('namespace')
+            if metadata.get('annotations', {}).get('bareplane.io/component') == 'vault' and namespace not in namespaces:
+                require('vault-secrets' in namespaces and vault_sources == [namespace] and len(vault_classes) == 1
+                        and re.fullmatch(r'bareplane-vault-[0-9a-f]{32}', vault_classes[0])
+                        and isinstance(namespace, str) and re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', namespace)
+                        and namespace != 'argocd' and not namespace.startswith('kube-')
+                        and metadata.get('annotations', {}).get('bareplane.io/existing-namespace') == namespace,
+                        'Vault may reference only its explicit workload namespace and controller class')
+                if namespace not in verified_source_namespaces:
+                    current = client.json('get', 'namespace', namespace, '--ignore-not-found', '-o', 'json')
+                    require(current.get('metadata', {}).get('uid') and not current['metadata'].get('deletionTimestamp'),
+                            'The explicitly referenced Vault workload namespace must already exist and not be terminating')
+                    verified_source_namespaces.add(namespace)
+                verify_vault_workload_resource(client, obj, namespace, vault_classes[0], declared_custom)
+                continue
             if metadata.get('annotations', {}).get('bareplane.io/component') == 'external-dns' and kind in {'Role', 'RoleBinding'}:
                 expected_rules = [dict(apiGroups=[''], resources=['services'], verbs=['get', 'list', 'watch'])]
                 expected_role = dict(apiGroup='rbac.authorization.k8s.io', kind='Role', name='bareplane-external-dns-reader')

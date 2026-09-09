@@ -6,6 +6,8 @@ The optional [`spec.components` selection](component-selection.md) enables or di
 
 The optional [`spec.secrets.sops` integration](sops.md) accepts only operator key references and an explicit namespace allowlist; no private key or secret value belongs in this configuration.
 
+The advanced [`spec.secrets.vault` integration](vault.md) references an externally managed TLS Vault and scoped Kubernetes auth role. It contains no tokens or secret values and does not deploy a Vault cluster.
+
 Bareplane uses a single versioned `bareplane.yaml` file as the user-facing source of intent.
 
 ## Initialize

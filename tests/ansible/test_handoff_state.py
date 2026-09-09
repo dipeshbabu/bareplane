@@ -137,6 +137,58 @@ class NewComponentOwnershipTests(unittest.TestCase):
                 handoff.verify_new_component_absence(Client(), changed)
 
 
+class VaultNamespaceOwnershipTests(unittest.TestCase):
+    def setUp(self):
+        self.resources = []
+        for name in ['crds.yaml', 'controller.yaml', 'integration.yaml']:
+            self.resources += list(yaml.safe_load_all((ROOT / 'components/vault' / name).read_bytes()))
+        self.calls, self.existing = [], None
+        self.namespace = {'metadata': {'uid': 'workload-namespace'}}
+
+    def json(self, *args):
+        self.calls.append(args)
+        if args[1:3] == ('namespace', 'vault-workloads'):
+            return self.namespace
+        return {'metadata': {'uid': 'foreign'}} if args[1:3] == self.existing else {}
+
+    def test_only_new_scoped_resources_are_allowed_in_the_existing_namespace(self):
+        handoff.verify_new_component_absence(self, self.resources)
+        self.assertTrue(all(args[0] == 'get' for args in self.calls))
+        self.assertIn(('get', 'serviceaccounts', 'bareplane-vault-reader', '-n', 'vault-workloads', '--ignore-not-found', '-o', 'json'), self.calls)
+        self.assertIn(('get', 'secrets', 'database', '-n', 'vault-workloads', '--ignore-not-found', '-o', 'json'), self.calls)
+        self.assertEqual(sum(args[1:3] == ('namespace', 'vault-workloads') for args in self.calls), 1)
+
+    def test_missing_terminating_or_existing_identities_are_refused(self):
+        for namespace in [{}, {'metadata': {'uid': 'workloads', 'deletionTimestamp': 'now'}}]:
+            self.namespace = namespace
+            with self.assertRaises(git.GitOpsError):
+                handoff.verify_new_component_absence(self, self.resources)
+        self.namespace = {'metadata': {'uid': 'workloads'}}
+        for existing in [('serviceaccounts', 'bareplane-vault-reader'), ('roles.rbac.authorization.k8s.io', 'bareplane-vault-controller'),
+                         ('rolebindings.rbac.authorization.k8s.io', 'bareplane-vault-controller'), ('secrets', 'database'),
+                         ('CustomResourceDefinition', 'externalsecrets.external-secrets.io')]:
+            self.existing = existing
+            with self.subTest(existing=existing), self.assertRaises(git.GitOpsError):
+                handoff.verify_new_component_absence(self, self.resources)
+
+    def test_widened_rbac_or_ownership_contract_is_refused(self):
+        changes = [
+            ('Role', 'bareplane-vault-controller', lambda obj: obj['rules'][0]['verbs'].append('*')),
+            ('Role', 'bareplane-vault-controller', lambda obj: obj['rules'][5].update(resourceNames=['default'])),
+            ('Role', 'bareplane-vault-controller', lambda obj: obj['rules'][3]['verbs'].append('delete')),
+            ('RoleBinding', 'bareplane-vault-controller', lambda obj: obj['subjects'][0].update(namespace='argocd')),
+            ('ServiceAccount', 'bareplane-vault-reader', lambda obj: obj.update(automountServiceAccountToken=True)),
+            ('ExternalSecret', 'bareplane-vault-database', lambda obj: obj['spec']['target'].update(creationPolicy='Owner')),
+            ('ExternalSecret', 'bareplane-vault-database', lambda obj: obj['spec']['target'].update(deletionPolicy='Delete')),
+            ('ExternalSecret', 'bareplane-vault-database', lambda obj: obj['metadata']['annotations'].update({'bareplane.io/existing-namespace': 'other'})),
+        ]
+        for kind, name, mutate in changes:
+            resources = copy.deepcopy(self.resources)
+            mutate(next(obj for obj in resources if obj['kind'] == kind and obj['metadata']['name'] == name))
+            with self.subTest(kind=kind, name=name), self.assertRaises(git.GitOpsError):
+                handoff.verify_new_component_absence(self, resources)
+
+
 class HandoffPlanTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
