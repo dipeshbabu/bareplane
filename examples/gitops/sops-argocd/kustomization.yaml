@@ -12,7 +12,7 @@ patches:
             template:
                 metadata:
                     annotations:
-                        bareplane.io/sops-config-sha256: eed89c18afce3364137db16cf9e43bcca2214311f48e54daef6f27b5788bb2ac
+                        bareplane.io/sops-config-sha256: 4c7c0a75be94dda1a85b7a5cc8680883530c1afbcf463f021097e368376a3c2e
                         bareplane.io/sops-keys-revision: initial
                 spec:
                     automountServiceAccountToken: false

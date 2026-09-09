@@ -80,6 +80,20 @@ class SOPSContractTests(unittest.TestCase):
             with self.assertRaises(plugin.Refusal):
                 plugin.decode(data)
 
+    def test_docker_secret_content_and_canonical_base64_are_validated_before_output(self):
+        obj = fixture()
+        obj.pop('sops')
+        obj.update(type='kubernetes.io/dockerconfigjson', stringData={'.dockerconfigjson': '{"auths":{}}'})
+        plugin.validate_secret(obj, POLICY['namespaces'], encrypted=False)
+        for value in ['not-json', '[]', '{"auths":null}', '{"auths":{},"auths":{}}']:
+            obj['stringData']['.dockerconfigjson'] = value
+            with self.subTest(value=value), self.assertRaises((ValueError, plugin.Refusal)):
+                plugin.validate_secret(obj, POLICY['namespaces'], encrypted=False)
+        obj.update(type='Opaque', data={'password': 'YR=='})
+        obj.pop('stringData')
+        with self.assertRaises(plugin.Refusal):
+            plugin.validate_secret(obj, POLICY['namespaces'], encrypted=False)
+
     def test_input_symlinks_fifos_and_size_are_refused_without_hanging(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

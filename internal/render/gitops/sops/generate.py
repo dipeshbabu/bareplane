@@ -83,11 +83,15 @@ def validate_secret(obj, namespaces, encrypted):
         require('sops' not in obj)
         if 'data' in obj:
             for value in values.values():
-                base64.b64decode(value, validate=True)
+                require(base64.b64encode(base64.b64decode(value, validate=True)).decode() == value)
     if obj['type'] == 'kubernetes.io/tls':
         require(set(values) == {'tls.crt', 'tls.key'})
     if obj['type'] == 'kubernetes.io/dockerconfigjson':
         require(set(values) == {'.dockerconfigjson'})
+        if not encrypted:
+            data = values['.dockerconfigjson']
+            docker = decode(base64.b64decode(data, validate=True) if 'data' in obj else data)
+            require(isinstance(docker, dict) and isinstance(docker.get('auths'), dict))
 
 
 def validate_ciphertext(obj, policy):
