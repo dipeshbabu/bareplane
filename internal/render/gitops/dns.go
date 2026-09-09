@@ -13,13 +13,22 @@ import (
 const ExternalDNSVersion = "0.22.0"
 
 func renderDNS(cfg config.Config, files map[string][]byte) error {
-	settings, err := cfg.RequireDNSAutomation()
-	if err != nil {
-		return err
-	}
 	data, err := assets.ReadFile("assets/external-dns/upstream.yaml")
 	if err != nil {
 		return err
+	}
+	rendered, err := renderDNSTemplate(cfg, data)
+	if err != nil {
+		return err
+	}
+	files["components/external-dns/upstream.yaml"] = rendered
+	return nil
+}
+
+func renderDNSTemplate(cfg config.Config, data []byte) ([]byte, error) {
+	settings, err := cfg.RequireDNSAutomation()
+	if err != nil {
+		return nil, err
 	}
 	replace := strings.NewReplacer(
 		"BAREPLANE_CLUSTER_NAME", cfg.Metadata.Name,
@@ -54,25 +63,27 @@ func renderDNS(cfg config.Config, files map[string][]byte) error {
 	var output bytes.Buffer
 	encoder := yaml.NewEncoder(&output)
 	encoder.SetIndent(2)
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	// yaml.v3 preserves CRLF comment separators differently when re-encoding
+	// nodes. Normalize before parsing, just like the other embedded assets, so
+	// checkout settings cannot change export bytes or their ownership hashes.
+	decoder := yaml.NewDecoder(bytes.NewReader(bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))))
 	for {
 		var document yaml.Node
 		if err := decoder.Decode(&document); errors.Is(err, io.EOF) {
 			break
 		} else if err != nil {
-			return err
+			return nil, err
 		}
 		visit(&document)
 		if err := encoder.Encode(&document); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if err := encoder.Close(); err != nil {
-		return err
+		return nil, err
 	}
 	if bytes.Contains(output.Bytes(), []byte("BAREPLANE_")) {
-		return errors.New("ExternalDNS payload contains an unresolved public input")
+		return nil, errors.New("ExternalDNS payload contains an unresolved public input")
 	}
-	files["components/external-dns/upstream.yaml"] = output.Bytes()
-	return nil
+	return output.Bytes(), nil
 }
