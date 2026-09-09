@@ -57,7 +57,8 @@ def exercise_dns(component, model, repository):
 
     def read_count():
         with model.lock:
-            return sum(request['method'] == 'GET' and request['path'].endswith('/dns_records') for request in model.requests)
+            return sum(request['method'] == 'GET' and request['path'].endswith('/dns_records') and request['page'] == '1'
+                       for request in model.requests)
 
     def target_matches(name, target):
         found = records(name)

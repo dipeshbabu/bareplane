@@ -7,7 +7,7 @@ import json
 import os
 import re
 import threading
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 
 class FakeCloudflare:
@@ -74,9 +74,11 @@ class FakeCloudflare:
         return copy.deepcopy(self.records[identifier])
 
     def handle(self, method, path, authorization, payload=None):
-        path = urlsplit(path).path.rstrip('/')
+        parsed = urlsplit(path)
+        query = parse_qs(parsed.query)
+        path = parsed.path.rstrip('/')
         with self.lock:
-            self.requests.append(dict(method=method, path=path))
+            self.requests.append(dict(method=method, path=path, page=query.get('page', ['1'])[0][:16]))
             if not self.authorized or authorization != 'Bearer ' + self.token:
                 self.denials += 1
                 return self.error()
@@ -84,7 +86,20 @@ class FakeCloudflare:
             if method == 'GET' and path == prefix:
                 return self.result(dict(id=self.zone_id, name=self.zone_name, status='active', paused=False, type='full', plan=dict(name='Free')))
             if method == 'GET' and path == prefix + '/dns_records':
-                return self.result(self.snapshot())
+                try:
+                    page = int(query.get('page', ['1'])[0])
+                    per_page = int(query.get('per_page', ['5000'])[0])
+                    if page < 1 or not 1 <= per_page <= 5000:
+                        raise ValueError('invalid pagination')
+                except (TypeError, ValueError):
+                    return self.error(400)
+                records = self.snapshot()
+                start = (page - 1) * per_page
+                values = records[start:start + per_page]
+                status, response = self.result(values)
+                response['result_info'].update(page=page, per_page=per_page, count=len(values),
+                    total_count=len(records), total_pages=max(1, (len(records) + per_page - 1) // per_page))
+                return status, response
             if not path.startswith(prefix + '/dns_records'):
                 return self.error(404)
             self.mutations.append(dict(method=method, path=path, payload=copy.deepcopy(payload)))

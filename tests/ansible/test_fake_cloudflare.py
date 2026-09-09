@@ -44,3 +44,14 @@ class FakeCloudflareTests(unittest.TestCase):
     def test_non_disposable_external_binding_is_refused(self):
         with self.assertRaises(ValueError):
             FakeCloudflareServer(self.model, '0.0.0.0')
+
+    def test_pagination_exhaustion_returns_empty_records_for_sdk_autopager(self):
+        for number in range(3):
+            self.model.seed(f'app{number}.apps.example.test', 'A', '192.0.2.11')
+        for page, count in [(1, 2), (2, 1), (3, 0)]:
+            status, response = self.model.handle('GET', self.path + f'?page={page}&per_page=2', self.auth)
+            self.assertEqual(status, 200)
+            self.assertEqual(len(response['result']), count)
+            self.assertEqual(response['result_info'], dict(page=page, per_page=2, count=count, total_count=3, total_pages=2))
+        for query in ['page=0', 'page=bad', 'per_page=0', 'per_page=5001']:
+            self.assertEqual(self.model.handle('GET', self.path + '?' + query, self.auth)[0], 400)
