@@ -78,9 +78,18 @@ def strict_schema(value):
     return value
 
 
+def restricted_lua():
+    lua = LuaRuntime(register_eval=False, register_builtins=False)
+    # Argo 3.5.2 opens base/table and a safe OS subset, not the string/math/io
+    # libraries. These health scripts require only base/table operations.
+    for name in ['string', 'math', 'io', 'os', 'debug', 'utf8', 'coroutine', 'package', 'require']:
+        lua.globals()[name] = None
+    return lua
+
+
 def validate_child_health(script):
     def assess(obj):
-        lua = LuaRuntime(register_eval=False, register_builtins=False)
+        lua = restricted_lua()
         # API JSON is a tree: remove Python fixture aliases before conversion.
         lua.globals().obj = lua.table_from(json.loads(json.dumps(obj)), recursive=True)
         return lua.execute(script)["status"]
@@ -231,12 +240,53 @@ def main():
         for app in sops_apps:
             validator.validate(app)
         applications += sops_apps
+        vault_root = root / 'vault'
+        vault_root.mkdir()
+        vault_config = yaml.safe_load((Path(__file__).resolve().parents[2] / 'examples/vault-fixture.yaml').read_bytes())
+        vault_config['metadata']['name'] = 'false'
+        vault_config['spec']['secrets']['vault']['workloadNamespace'] = 'on'
+        vault_config['spec']['secrets']['vault']['secrets'][0]['name'] = '123'
+        vault_path = vault_root / 'bareplane.yaml'
+        vault_path.write_text(yaml.safe_dump(vault_config), encoding='utf-8')
+        run([bareplane, 'gitops', 'render', str(vault_path)])
+        vault_export = vault_root / 'gitops'
+        vault_docs = list(yaml.safe_load_all(run([kubectl, 'kustomize', str(vault_export / 'components/vault')])))
+        vault_argo = list(yaml.safe_load_all(run([kubectl, 'kustomize', str(vault_export / 'components/argocd')])))
+        assert len(vault_argo) == 38
+        vault_configmap = next(obj for obj in vault_argo if obj['kind'] == 'ConfigMap' and obj['metadata']['name'] == 'argocd-cm')
+        for definition in vault_docs:
+            if definition['kind'] == 'CustomResourceDefinition':
+                for version in definition['spec']['versions']:
+                    custom_validators[definition['spec']['group'] + '/' + version['name'], definition['spec']['names']['kind']] = \
+                        jsonschema.Draft4Validator(strict_schema(copy.deepcopy(version['schema']['openAPIV3Schema'])))
+        vault_custom = [obj for obj in vault_docs if obj['apiVersion'] == 'external-secrets.io/v1']
+        for obj in vault_custom:
+            custom_validators[obj['apiVersion'], obj['kind']].validate(obj)
+        custom_resources += vault_custom
+        documents += [obj for obj in vault_docs if obj['apiVersion'] != 'external-secrets.io/v1'] + vault_argo
+        vault_apps = list(yaml.safe_load_all(run([kubectl, 'kustomize', str(vault_export / vault_config['spec']['gitops']['rootPath'])])))
+        for app in vault_apps:
+            validator.validate(app)
+        applications += vault_apps
+        for kind in ['SecretStore', 'ExternalSecret']:
+            script = vault_configmap['data']['resource.customizations.health.external-secrets.io_' + kind]
+            for status, expected in [('True', 'Healthy'), ('False', 'Degraded'), ('Unknown', 'Progressing')]:
+                lua = restricted_lua()
+                lua.globals().obj = lua.table_from(dict(metadata=dict(generation=2), status=dict(
+                    conditions=[dict(type='Ready', status=status)], syncedResourceVersion='2-current', refreshTime='2026-09-09T00:00:00Z')), recursive=True)
+                assert lua.execute(script)['status'] == expected
+            if kind == 'ExternalSecret':
+                for generation, version in [(3, '2-old'), (2, '20-other'), (20, '2-other'), (2, '2-'), (2, '2'), (2, {}), (None, '2-current')]:
+                    lua = restricted_lua()
+                    lua.globals().obj = lua.table_from(dict(metadata=dict(generation=generation), status=dict(
+                        conditions=[dict(type='Ready', status='True')], syncedResourceVersion=version, refreshTime='2026-09-09T00:00:00Z')), recursive=True)
+                    assert lua.execute(script)['status'] == 'Progressing'
         for obj in custom_resources:
             custom = custom_validators[obj['apiVersion'], obj['kind']]
             custom.validate(obj)
             invalid = copy.deepcopy(obj)
             invalid['spec']['unexpectedField'] = 'reject'
-            assert not custom.is_valid(invalid), 'Certificate schema must reject unknown fields'
+            assert not custom.is_valid(invalid), 'Platform custom-resource schema must reject unknown fields'
         documents += [obj for obj in component_docs if obj['apiVersion'] != 'cert-manager.io/v1']
         for obj in documents:
             if obj["kind"] in {"Deployment", "StatefulSet"}:
@@ -263,7 +313,7 @@ def main():
         assert summary["valid"] + len(definitions) == len(documents)
         run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests/ansible', '-p', 'test_handoff_state.py'],
             env=dict(os.environ, BAREPLANE_TEST_KUBECTL=kubectl))
-        print(f"Validated {len(documents)} Kubernetes resources, {len(applications)} strict Argo Applications, and {len(custom_resources)} certificate/issuer resources; deterministic export, root commit pinning, and Kustomize patches passed")
+        print(f"Validated {len(documents)} Kubernetes resources, {len(applications)} strict Argo Applications, and {len(custom_resources)} typed platform custom resources; deterministic export, root commit pinning, and Kustomize patches passed")
 
 
 if __name__ == "__main__":
