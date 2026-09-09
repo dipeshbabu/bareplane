@@ -95,6 +95,11 @@ func Render(cfg config.Config) (map[string][]byte, error) {
 				return nil, err
 			}
 		}
+		if component.ID == "vault" {
+			if err := renderVault(cfg, files); err != nil {
+				return nil, err
+			}
+		}
 	}
 	for _, component := range components {
 		if component.ID == "secrets-sops" {

@@ -1,0 +1,123 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-15"
+    bareplane.io/cluster: lab
+    bareplane.io/component: vault
+  name: bareplane-vault-secret-ownership
+spec:
+  failurePolicy: Fail
+  matchConditions:
+    - expression: (request.userInfo.username == 'system:serviceaccount:vault-secrets:bareplane-vault') || (object.metadata.namespace == "vault-workloads" && object.metadata.name in ["database"]) || (has(object.metadata.labels) && 'bareplane.io/vault-managed' in object.metadata.labels && object.metadata.labels['bareplane.io/vault-managed'] == 'true') || (oldObject != null && has(oldObject.metadata.labels) && 'bareplane.io/vault-managed' in oldObject.metadata.labels && oldObject.metadata.labels['bareplane.io/vault-managed'] == 'true')
+      name: vault-targets
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - ""
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - secrets
+        scope: Namespaced
+  validations:
+    - expression: request.userInfo.username == 'system:serviceaccount:vault-secrets:bareplane-vault'
+      message: Vault-managed Secrets must be written by the scoped operator
+    - expression: object.metadata.namespace == "vault-workloads" && object.metadata.name in ["database"]
+      message: Vault operator Secret is outside its configured targets
+    - expression: oldObject == null || (oldObject != null && has(oldObject.metadata.labels) && 'bareplane.io/vault-managed' in oldObject.metadata.labels && oldObject.metadata.labels['bareplane.io/vault-managed'] == 'true')
+      message: Vault refuses to adopt an existing unmanaged Secret
+    - expression: has(object.metadata.labels) && 'bareplane.io/vault-managed' in object.metadata.labels && object.metadata.labels['bareplane.io/vault-managed'] == 'true'
+      message: Vault Secret ownership must be preserved
+    - expression: (has(object.metadata.labels) && 'bareplane.io/vault-source' in object.metadata.labels) && object.metadata.name in ["database"] && object.metadata.labels['bareplane.io/vault-source'] == {"database":"bareplane-vault-database"}[object.metadata.name]
+      message: Vault Secret source identity differs from its contract
+    - expression: oldObject == null || (has(oldObject.metadata.labels) && 'bareplane.io/vault-source' in oldObject.metadata.labels && oldObject.metadata.labels['bareplane.io/vault-source'] == object.metadata.labels['bareplane.io/vault-source'])
+      message: Vault Secret ownership cannot transfer between sources
+    - expression: '!has(object.metadata.ownerReferences) || size(object.metadata.ownerReferences) == 0'
+      message: Retained Vault Secrets must not acquire garbage-collection owners
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-15"
+    bareplane.io/cluster: lab
+    bareplane.io/component: vault
+  name: bareplane-vault-secret-ownership
+spec:
+  policyName: bareplane-vault-secret-ownership
+  validationActions:
+    - Deny
+---
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    bareplane.io/cluster: lab
+    bareplane.io/component: vault
+    bareplane.io/existing-namespace: vault-workloads
+  name: bareplane-vault-0211c0b95605588858fe2776876f09db
+  namespace: vault-workloads
+spec:
+  controller: bareplane-vault-0211c0b95605588858fe2776876f09db
+  provider:
+    vault:
+      auth:
+        kubernetes:
+          mountPath: kubernetes
+          role: workloads-reader
+          serviceAccountRef:
+            audiences:
+              - vault
+            name: bareplane-vault-reader
+      caProvider:
+        key: ca.crt
+        name: vault-ca
+        type: Secret
+      path: kv
+      server: https://vault.example.test:8200
+      version: v2
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    bareplane.io/cluster: lab
+    bareplane.io/component: vault
+    bareplane.io/existing-namespace: vault-workloads
+  name: bareplane-vault-database
+  namespace: vault-workloads
+spec:
+  data:
+    - remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: None
+        key: apps/database
+        property: password
+      secretKey: password
+    - remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: None
+        key: apps/database
+        property: username
+      secretKey: username
+  refreshInterval: 1m
+  refreshPolicy: Periodic
+  secretStoreRef:
+    kind: SecretStore
+    name: bareplane-vault-0211c0b95605588858fe2776876f09db
+  target:
+    creationPolicy: Orphan
+    deletionPolicy: Retain
+    name: database
+    template:
+      metadata:
+        labels:
+          bareplane.io/vault-managed: "true"
+          bareplane.io/vault-source: bareplane-vault-database
+      type: Opaque
