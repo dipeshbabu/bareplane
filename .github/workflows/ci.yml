@@ -23,13 +23,13 @@ jobs:
         run: python .github/scripts/ci_acceptance_gate.py
 
   join-topology:
-    name: "${{ matrix.mode == 'external-dns' && 'Core DNS VM' || matrix.mode == 'metrics-server' && 'Core Metrics Server VM' || matrix.mode == 'kubelet-tls' && 'Kubelet serving TLS VMs' || matrix.mode == 'cert-manager' && 'Core cert-manager VM' || matrix.mode == 'handoff' && 'GitOps handoff VM' || matrix.mode == 'argocd' && 'Argo installation VM' || matrix.mode == 'recovery' && 'Bootstrap recovery VM' || matrix.mode == 'apply' && 'Bootstrap apply VMs' || 'Multi-node join VMs' }}"
+    name: "${{ matrix.mode == 'sops' && 'Core SOPS VM' || matrix.mode == 'external-dns' && 'Core DNS VM' || matrix.mode == 'metrics-server' && 'Core Metrics Server VM' || matrix.mode == 'kubelet-tls' && 'Kubelet serving TLS VMs' || matrix.mode == 'cert-manager' && 'Core cert-manager VM' || matrix.mode == 'handoff' && 'GitOps handoff VM' || matrix.mode == 'argocd' && 'Argo installation VM' || matrix.mode == 'recovery' && 'Bootstrap recovery VM' || matrix.mode == 'apply' && 'Bootstrap apply VMs' || 'Multi-node join VMs' }}"
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        mode: [phases, apply, recovery, argocd, handoff, cert-manager, kubelet-tls, metrics-server, external-dns]
+        mode: [phases, apply, recovery, argocd, handoff, cert-manager, kubelet-tls, metrics-server, external-dns, sops]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -62,9 +62,15 @@ jobs:
           BAREPLANE_TEST_KUBELET_TLS: "${{ matrix.mode == 'kubelet-tls' && '1' || '0' }}"
           BAREPLANE_TEST_METRICS_SERVER: "${{ matrix.mode == 'metrics-server' && '1' || '0' }}"
           BAREPLANE_TEST_EXTERNAL_DNS: "${{ matrix.mode == 'external-dns' && '1' || '0' }}"
+          BAREPLANE_TEST_SOPS_DELIVERY: "${{ matrix.mode == 'sops' && '1' || '0' }}"
           BAREPLANE_TEST_GIT_REF: "${{ github.event.pull_request.head.sha || github.sha }}"
           BAREPLANE_TEST_GIT_REPO: "${{ github.event.pull_request.head.repo.clone_url || format('{0}/{1}.git', github.server_url, github.repository) }}"
-        run: python tests/ansible/join_topology_vm.py
+        run: |
+          if [ "$BAREPLANE_TEST_SOPS_DELIVERY" = 1 ]; then
+            python hack/install_sops_test_tools.py "$RUNNER_TEMP"
+            export PATH="$RUNNER_TEMP:$PATH"
+          fi
+          python tests/ansible/join_topology_vm.py
 
   host-prepare:
     name: Host preparation VM
@@ -144,7 +150,11 @@ jobs:
       - name: Test VIP interface and conflict detection
         env:
           BAREPLANE_TEST_PUBLIC_GIT: '1'
-        run: python -m unittest discover -s tests/ansible -p 'test_*.py'
+          BAREPLANE_TEST_SOPS: '1'
+        run: |
+          python hack/install_sops_test_tools.py "$RUNNER_TEMP"
+          export PATH="$RUNNER_TEMP:$PATH"
+          python -m unittest discover -s tests/ansible -p 'test_*.py'
 
       - name: Test concurrent branch cleanup with isolated Git repositories
         run: python -m unittest discover -s tests/github -p 'test_*.py'

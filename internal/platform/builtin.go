@@ -8,6 +8,7 @@ func Builtin() (*Registry, error) {
 		{ID: "kubelet-serving-tls", Dependencies: []string{"cilium"}, Owner: Bootstrap, Status: Implemented, BaseWave: -40},
 		{ID: "metrics-server", Dependencies: []string{"argocd", "cert-manager", "kubelet-serving-tls"}, Owner: GitOps, Status: Implemented, Namespace: "metrics-server", BaseWave: -10},
 		{ID: "external-dns", Dependencies: []string{"argocd"}, Owner: GitOps, Status: Implemented, Namespace: "external-dns", BaseWave: -20},
+		{ID: "secrets-sops", Dependencies: []string{"argocd"}, Conflicts: []string{"vault"}, Owner: GitOps, Status: Implemented, BaseWave: -20},
 		{ID: "gpu-passthrough", Owner: Infrastructure, Status: Unavailable, BaseWave: -60},
 		{ID: "gpu-drivers", Dependencies: []string{"gpu-passthrough"}, Owner: Bootstrap, Status: Unavailable, BaseWave: -50},
 		{ID: "node-feature-discovery", Dependencies: []string{"argocd"}, Owner: GitOps, Status: Unavailable, BaseWave: -20},
@@ -29,11 +30,8 @@ func Builtin() (*Registry, error) {
 		{ID: "redis", Dependencies: []string{"storage", "data-recovery"}, Owner: GitOps, Status: Unavailable, BaseWave: -9},
 		{ID: "superset", Dependencies: []string{"postgres", "trino"}, Owner: GitOps, Status: Unavailable, BaseWave: 1},
 	}
-	for _, id := range []string{"observability", "secrets-sops", "vault"} {
+	for _, id := range []string{"observability", "vault"} {
 		component := Component{ID: id, Dependencies: []string{"argocd"}, Owner: GitOps, Status: Unavailable, BaseWave: -20}
-		if id == "secrets-sops" {
-			component.Conflicts = []string{"vault"}
-		}
 		if id == "vault" {
 			component.Conflicts = []string{"secrets-sops"}
 		}

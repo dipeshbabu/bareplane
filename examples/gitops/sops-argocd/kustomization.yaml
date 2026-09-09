@@ -1,0 +1,115 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+patches:
+    - path: configuration.yaml
+    - patch: |
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+            name: argocd-repo-server
+            namespace: argocd
+        spec:
+            template:
+                metadata:
+                    annotations:
+                        bareplane.io/sops-config-sha256: eed89c18afce3364137db16cf9e43bcca2214311f48e54daef6f27b5788bb2ac
+                        bareplane.io/sops-keys-revision: initial
+                spec:
+                    automountServiceAccountToken: false
+                    containers:
+                        - command:
+                            - /var/run/argocd/argocd-cmp-server
+                          env:
+                            - name: ARGOCD_EXEC_TIMEOUT
+                              value: 70s
+                          image: ghcr.io/getsops/sops:v3.13.3
+                          imagePullPolicy: IfNotPresent
+                          name: bareplane-sops
+                          resources:
+                            limits:
+                                memory: 512Mi
+                            requests:
+                                cpu: 100m
+                                memory: 128Mi
+                          securityContext:
+                            allowPrivilegeEscalation: false
+                            capabilities:
+                                drop:
+                                    - ALL
+                            readOnlyRootFilesystem: true
+                            runAsGroup: 999
+                            runAsNonRoot: true
+                            runAsUser: 999
+                            seccompProfile:
+                                type: RuntimeDefault
+                          volumeMounts:
+                            - mountPath: /var/run/argocd
+                              name: var-files
+                              readOnly: true
+                            - mountPath: /home/argocd/cmp-server/plugins
+                              name: plugins
+                            - mountPath: /tmp
+                              name: sops-tmp
+                            - mountPath: /home/argocd/cmp-server/config
+                              name: sops-config
+                              readOnly: true
+                            - mountPath: /var/run/bareplane-sops/age
+                              name: sops-age
+                              readOnly: true
+                            - mountPath: /var/run/bareplane-sops/pgp
+                              name: sops-pgp
+                              readOnly: true
+                            - mountPath: /var/run/bareplane-sops/passphrase
+                              name: sops-passphrase
+                              readOnly: true
+                    securityContext:
+                        fsGroup: 999
+                    volumes:
+                        - emptyDir:
+                            medium: Memory
+                            sizeLimit: 256Mi
+                          name: sops-tmp
+                        - configMap:
+                            defaultMode: 365
+                            items:
+                                - key: sops-generate.py
+                                  path: generate.py
+                                - key: sops-gpg
+                                  path: gpg
+                                - key: sops-plugin.yaml
+                                  path: plugin.yaml
+                                - key: sops-policy.json
+                                  path: policy.json
+                            name: argocd-cm
+                          name: sops-config
+                        - name: sops-age
+                          secret:
+                            defaultMode: 288
+                            items:
+                                - key: keys.txt
+                                  path: key
+                            optional: true
+                            secretName: bareplane-sops-age
+                        - name: sops-pgp
+                          secret:
+                            defaultMode: 288
+                            items:
+                                - key: private.asc
+                                  path: key
+                            optional: true
+                            secretName: bareplane-sops-pgp
+                        - name: sops-passphrase
+                          secret:
+                            defaultMode: 288
+                            items:
+                                - key: passphrase
+                                  path: key
+                            optional: true
+                            secretName: bareplane-sops-passphrase
+      target:
+        group: apps
+        kind: Deployment
+        name: argocd-repo-server
+        version: v1
+resources:
+    - ../../../components/argocd

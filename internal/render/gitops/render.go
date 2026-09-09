@@ -91,6 +91,13 @@ func Render(cfg config.Config) (map[string][]byte, error) {
 			}
 		}
 	}
+	for _, component := range components {
+		if component.ID == "secrets-sops" {
+			if err := renderSOPS(cfg, files); err != nil {
+				return nil, err
+			}
+		}
+	}
 	resources := make([]string, 0, len(components))
 	componentNames := make([]string, 0, len(components))
 	objects := map[string]any{

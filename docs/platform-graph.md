@@ -15,7 +15,7 @@ The current executable minimal profile remains **Argo CD only**, with bootstrap-
 
 Jupyter/OpenWebUI and alternative or supporting data services (Flink, ClickHouse, Redis, Superset) have explicit optional registry entries rather than being enabled indiscriminately. Core platform entries such as metrics-server, cert-manager, external DNS, observability, and secrets backends remain unavailable and opt-in until their component issues land. Registry metadata is not an implementation or deployment claim: pins, complete credential/storage contracts, compatibility, and health checks must be added before availability changes.
 
-The existing `gpu`, `observability`, Cloudflare DNS, and Vault config choices request their corresponding capabilities through the same registry. Default SOPS configuration is still the documented extension boundary, not an implicit request to install an unavailable secret-delivery controller. SOPS and Vault backend selections conflict when both are explicitly selected through the resolver API.
+The existing `gpu`, `observability`, Cloudflare DNS, and Vault config choices request their corresponding capabilities through the same registry. Default SOPS configuration is not an implicit request to install a secret-delivery controller; the explicit [SOPS key-reference contract](sops.md) selects its implemented integration. SOPS and Vault backend selections conflict when both are explicitly selected through the resolver API.
 
 [`spec.components`](component-selection.md) exposes strict explicit selections. Configuration maps profiles, optional enable/disable lists, and existing flags into one registry resolution; the registry itself does not import configuration.
 

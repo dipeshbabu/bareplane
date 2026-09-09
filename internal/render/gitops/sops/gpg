@@ -1,0 +1,4 @@
+#!/bin/sh
+# Only SOPS's fixed decrypt arguments reach this wrapper. No repository command
+# or application environment variable is interpreted as shell source.
+exec /usr/bin/gpg --no-options --batch --no-tty --no-auto-key-retrieve --auto-key-locate clear --pinentry-mode loopback --passphrase-file "$BAREPLANE_SOPS_PASSPHRASE_FILE" "$@"

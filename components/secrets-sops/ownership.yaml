@@ -1,0 +1,47 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+    annotations:
+        bareplane.io/cluster: lab
+        bareplane.io/component: secrets-sops
+    name: bareplane-sops-secret-ownership
+spec:
+    failurePolicy: Fail
+    matchConditions:
+        - expression: (has(object.metadata.labels) && 'bareplane.io/sops-managed' in object.metadata.labels && object.metadata.labels['bareplane.io/sops-managed'] == 'true') || (oldObject != null && has(oldObject.metadata.labels) && 'bareplane.io/sops-managed' in oldObject.metadata.labels && oldObject.metadata.labels['bareplane.io/sops-managed'] == 'true')
+          name: sops-managed
+    matchConstraints:
+        resourceRules:
+            - apiGroups:
+                - ""
+              apiVersions:
+                - v1
+              operations:
+                - CREATE
+                - UPDATE
+              resources:
+                - secrets
+              scope: Namespaced
+    validations:
+        - expression: request.userInfo.username == 'system:serviceaccount:argocd:argocd-application-controller'
+          message: SOPS-managed Secrets must be written by Argo
+        - expression: object.metadata.namespace in ["sops-workloads"]
+          message: SOPS Secret namespace is not allowed
+        - expression: has(object.metadata.labels) && 'bareplane.io/sops-managed' in object.metadata.labels && object.metadata.labels['bareplane.io/sops-managed'] == 'true'
+          message: SOPS ownership cannot be removed
+        - expression: oldObject == null || (oldObject != null && has(oldObject.metadata.labels) && 'bareplane.io/sops-managed' in oldObject.metadata.labels && oldObject.metadata.labels['bareplane.io/sops-managed'] == 'true')
+          message: SOPS refuses to adopt an existing unmanaged Secret
+        - expression: (has(object.metadata.annotations) && 'argocd.argoproj.io/tracking-id' in object.metadata.annotations && object.metadata.annotations['argocd.argoproj.io/tracking-id'] != '') && (oldObject == null || (has(oldObject.metadata.annotations) && 'argocd.argoproj.io/tracking-id' in oldObject.metadata.annotations && oldObject.metadata.annotations['argocd.argoproj.io/tracking-id'] == object.metadata.annotations['argocd.argoproj.io/tracking-id']))
+          message: SOPS refuses to transfer Secret ownership between Applications
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+    annotations:
+        bareplane.io/cluster: lab
+        bareplane.io/component: secrets-sops
+    name: bareplane-sops-secret-ownership
+spec:
+    policyName: bareplane-sops-secret-ownership
+    validationActions:
+        - Deny

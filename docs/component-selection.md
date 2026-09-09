@@ -16,7 +16,7 @@ Profile members and their dependencies are required. In particular, bootstrap-ow
 
 Selection is distinct from availability. A well-formed request for a planned capability can be stored and inspected, but GitOps rendering still refuses unavailable/experimental implementations and emits no partial tree. This contract issue enables no new component. As focused M3 issues land, Metrics Server and cert-manager are candidates for optional minimal defaults; the final core-profile integration must enable only verified implementations. Manual DNS, cluster-local exposure, no automatic storage provisioning, and no implicit secret-key delivery remain the safe baseline.
 
-SOPS remains an extension boundary until its actual integration is configured and implemented. Vault is an explicit advanced provider choice. This block never carries plaintext keys, tokens, secret values, repository credentials, or ownership overrides.
+[SOPS](sops.md) is available only with explicit `spec.secrets.sops` key references and allowed namespaces. The default provider alone still enables no decryption sidecar. Vault remains a separately tracked advanced provider. This block never carries plaintext keys, tokens, secret values, repository credentials, or ownership overrides.
 
 cert-manager is now available explicitly via `enabled: [cert-manager]` or the
 [`spec.certificates` issuer contract](certificates.md); it is not yet a default.
