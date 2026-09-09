@@ -29,6 +29,11 @@ bootstrap-owned verified kubelet serving TLS as required dependencies. Its
 and kube-state-metrics. It requires acknowledgement of ephemeral history and
 does not implicitly introduce persistent storage, host agents or external access.
 
+[Static local storage](storage.md) is explicit and node-bound. It inventories
+operator-prepared empty directories, validates them read-only before PV creation,
+and retains data and claim identity after release. It is not an automatic or HA
+storage backend.
+
 [ExternalDNS](dns.md) is selected by Cloudflare or explicitly enabling
 `external-dns`, but controller rendering requires the full scoped automation
 contract. Manual DNS remains controller-free, and dry-run is the automation default.

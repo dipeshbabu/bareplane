@@ -100,6 +100,11 @@ func Render(cfg config.Config) (map[string][]byte, error) {
 				return nil, err
 			}
 		}
+		if component.ID == "storage" {
+			if err := renderStorage(cfg, files); err != nil {
+				return nil, err
+			}
+		}
 	}
 	for _, component := range components {
 		if component.ID == "secrets-sops" {
@@ -201,6 +206,15 @@ func application(cfg config.Config, component, sourcePath, wave string, namespac
 	if component == "metrics-server" {
 		result["spec"].(map[string]any)["ignoreDifferences"] = []map[string]any{
 			{"group": "apiregistration.k8s.io", "kind": "APIService", "name": "v1beta1.metrics.k8s.io", "jsonPointers": []string{"/spec/caBundle"}},
+		}
+		policy := result["spec"].(map[string]any)["syncPolicy"].(map[string]any)
+		policy["syncOptions"] = append(policy["syncOptions"].([]string), "RespectIgnoreDifferences=true")
+	}
+	if component == "storage" {
+		// Kubernetes' volume binder owns the live claim UID. Argo must not
+		// erase or rewrite that binding while reconciling retained static PVs.
+		result["spec"].(map[string]any)["ignoreDifferences"] = []map[string]any{
+			{"group": "", "kind": "PersistentVolume", "jsonPointers": []string{"/spec/claimRef"}},
 		}
 		policy := result["spec"].(map[string]any)["syncPolicy"].(map[string]any)
 		policy["syncOptions"] = append(policy["syncOptions"].([]string), "RespectIgnoreDifferences=true")

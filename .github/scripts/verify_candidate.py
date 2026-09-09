@@ -13,7 +13,7 @@ import urllib.request
 
 REQUIRED = {'Quality', 'Host preparation VM', 'Bootstrap apply VMs', 'Multi-node join VMs',
             'Bootstrap recovery VM', 'Argo installation VM', 'GitOps handoff VM', 'Core cert-manager VM', 'Kubelet serving TLS VMs',
-            'Core Metrics Server VM', 'Core DNS VM', 'Core SOPS VM', 'Core Vault VM', 'Core observability VM', 'v0.1 acceptance'}
+            'Core Metrics Server VM', 'Core DNS VM', 'Core SOPS VM', 'Core Vault VM', 'Core observability VM', 'Core local storage VM', 'v0.1 acceptance'}
 
 
 def verify_runs(runs, commit, default_branch):

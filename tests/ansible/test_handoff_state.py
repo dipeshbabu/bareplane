@@ -63,6 +63,16 @@ class NewComponentOwnershipTests(unittest.TestCase):
             with self.subTest(kind=resource['kind']), self.assertRaises(git.GitOpsError):
                 handoff.verify_new_component_absence(self, resources)
 
+    def test_local_storage_class_and_volumes_are_not_adopted(self):
+        resources = list(yaml.safe_load_all((ROOT / 'components/storage/resources.yaml').read_bytes()))
+        handoff.verify_new_component_absence(self, resources)
+        for resource in resources:
+            if resource['kind'] not in {'PersistentVolume', 'StorageClass'}:
+                continue
+            self.existing = (resource['kind'], resource['metadata']['name'])
+            with self.subTest(kind=resource['kind']), self.assertRaises(git.GitOpsError):
+                handoff.verify_new_component_absence(self, resources)
+
     def test_existing_namespace_crd_rbac_or_webhook_is_never_adopted(self):
         for resource in self.resources:
             if resource['kind'] not in {'Namespace', 'CustomResourceDefinition', 'ClusterRole', 'ClusterRoleBinding',
