@@ -20,7 +20,7 @@ func Builtin() (*Registry, error) {
 		{ID: "ray", Dependencies: []string{"argocd"}, Owner: GitOps, Status: Unavailable, Profiles: []string{"ai"}, BaseWave: -10},
 		{ID: "jupyter", Dependencies: []string{"argocd", "storage"}, Owner: GitOps, Status: Unavailable, BaseWave: 0},
 		{ID: "open-webui", Dependencies: []string{"model-serving"}, Owner: GitOps, Status: Unavailable, BaseWave: 1},
-		{ID: "storage", Dependencies: []string{"argocd"}, Owner: GitOps, Status: Unavailable, BaseWave: -20},
+		{ID: "storage", Dependencies: []string{"argocd"}, Owner: GitOps, Status: Implemented, Namespace: "local-storage", BaseWave: -20},
 		{ID: "data-recovery", Dependencies: []string{"storage"}, Owner: GitOps, Status: Unavailable, BaseWave: -10},
 		{ID: "postgres", Dependencies: []string{"storage", "data-recovery"}, Owner: GitOps, Status: Unavailable, Profiles: []string{"data"}, BaseWave: -10},
 		{ID: "kafka", Dependencies: []string{"storage", "data-recovery"}, Owner: GitOps, Status: Unavailable, Profiles: []string{"data"}, BaseWave: -10},

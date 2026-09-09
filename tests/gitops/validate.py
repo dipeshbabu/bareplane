@@ -287,6 +287,26 @@ def main():
         for app in vault_apps:
             validator.validate(app)
         applications += vault_apps
+        storage_root = root / 'storage'
+        storage_root.mkdir()
+        storage_config = yaml.safe_load((Path(__file__).resolve().parents[2] / 'examples/storage-fixture.yaml').read_bytes())
+        storage_config['metadata']['name'] = 'false'
+        storage_config['spec']['storage']['volumes'][0]['node'] = 'false-control-1'
+        storage_path = storage_root / 'bareplane.yaml'
+        storage_path.write_text(yaml.safe_dump(storage_config), encoding='utf-8')
+        run([bareplane, 'gitops', 'render', str(storage_path)])
+        storage_export = storage_root / 'gitops'
+        storage_docs = list(yaml.safe_load_all(run([kubectl, 'kustomize', str(storage_export / 'components/storage')])))
+        documents += storage_docs
+        storage_apps = list(yaml.safe_load_all(run([kubectl, 'kustomize', str(storage_export / storage_config['spec']['gitops']['rootPath'])])))
+        for app in storage_apps:
+            validator.validate(app)
+        applications += storage_apps
+        job = next(obj for obj in storage_docs if obj['kind'] == 'Job')
+        host_mount = next(mount for mount in job['spec']['template']['spec']['containers'][0]['volumeMounts'] if mount['name'] == 'host')
+        assert host_mount['readOnly'] is True and host_mount['recursiveReadOnly'] == 'Enabled'
+        pv = next(obj for obj in storage_docs if obj['kind'] == 'PersistentVolume')
+        assert pv['spec']['persistentVolumeReclaimPolicy'] == 'Retain'
         for kind in ['SecretStore', 'ExternalSecret']:
             script = vault_configmap['data']['resource.customizations.health.external-secrets.io_' + kind]
             for status, expected in [('True', 'Healthy'), ('False', 'Degraded'), ('Unknown', 'Progressing')]:

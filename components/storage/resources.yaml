@@ -1,0 +1,271 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-30"
+    bareplane.io/cluster: lab
+    bareplane.io/component: storage
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+  name: local-storage
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+    bareplane.io/cluster: lab
+    bareplane.io/component: storage
+  name: bareplane-storage-check
+  namespace: local-storage
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+    bareplane.io/cluster: lab
+    bareplane.io/component: storage
+  name: storage-check-isolation
+  namespace: local-storage
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: v1
+data:
+  check.py: |
+    #!/usr/local/bin/python3
+    """Read-only initial local-volume checks; never create, format or remove data."""
+
+    import os
+    from pathlib import Path
+    import re
+    import stat
+    import sys
+
+
+    NAME = re.compile(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z')
+    GIB = 1024 ** 3
+
+
+    class Refusal(Exception):
+        pass
+
+
+    def require(condition, reason):
+        if not condition:
+            raise Refusal(reason)
+
+
+    def mount_paths(data):
+        require(len(data) <= 4 * 1024 * 1024, 'mount inventory exceeded its limit')
+        paths = []
+        for line in data.decode('utf-8', errors='strict').splitlines():
+            fields = line.split(' ')
+            require(len(fields) >= 10 and '-' in fields, 'mount inventory is malformed')
+            paths.append(re.sub(r'\\([0-7]{3})', lambda match: chr(int(match[1], 8)), fields[4]))
+        return paths
+
+
+    def inspect(root, cluster, volume, node, required_gib, mounts, owner=0):
+        require(isinstance(cluster, str) and NAME.fullmatch(cluster) and isinstance(volume, str) and NAME.fullmatch(volume)
+                and len(volume) <= 32 and isinstance(node, str) and NAME.fullmatch(node)
+                and type(required_gib) is int and 1 <= required_gib <= 32768, 'local volume contract is invalid')
+        root = Path(root)
+        relative = ['var', 'lib', 'bareplane', 'local-volumes', cluster, volume, 'data']
+        target = str(root.joinpath(*relative))
+        for mount in mounts:
+            require(not (mount.startswith(str(root) + '/') and (target == mount or target.startswith(mount.rstrip('/') + '/'))),
+                    'local volume crosses a nested or bind mount')
+        descriptors, chain = [], []
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+        try:
+            parent = os.open(root, flags)
+            descriptors.append(parent)
+            root_info = os.fstat(parent)
+            require(root_info.st_uid == owner and not root_info.st_mode & 0o022, 'host root ownership is unsafe')
+            for name in relative:
+                child = os.open(name, flags, dir_fd=parent)
+                descriptors.append(child)
+                info = os.fstat(child)
+                require(stat.S_ISDIR(info.st_mode) and info.st_uid == owner and not info.st_mode & 0o022,
+                        'local volume ancestors must be privately controlled directories')
+                require(info.st_dev == root_info.st_dev, 'local volume is not on the declared root filesystem')
+                chain.append((parent, name, child))
+                parent = child
+            with os.scandir(parent) as entries:
+                require(next(entries, None) is None, 'initial local volume contains existing data')
+            available = os.fstatvfs(parent)
+            require(available.f_bavail * available.f_frsize >= (required_gib + 4) * GIB,
+                    'local volume capacity would consume the node reserve')
+            # Keep every descriptor open and compare directory identities again so
+            # a renamed/replaced path cannot be mistaken for the inspected path.
+            for parent, name, child in chain:
+                current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+                opened = os.fstat(child)
+                require((current.st_dev, current.st_ino) == (opened.st_dev, opened.st_ino) and stat.S_ISDIR(current.st_mode),
+                        'local volume path changed during inspection')
+            etc = os.open('etc', flags, dir_fd=descriptors[0])
+            descriptors.append(etc)
+            hostname = os.open('hostname', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=etc)
+            with os.fdopen(hostname, 'rb') as stream:
+                info = os.fstat(stream.fileno())
+                require(stat.S_ISREG(info.st_mode) and info.st_size <= 256, 'node hostname proof is invalid')
+                require(stream.read(257).decode().strip() == node, 'local volume is scheduled on a different node')
+        finally:
+            for descriptor in reversed(descriptors):
+                os.close(descriptor)
+
+
+    def main():
+        try:
+            require(len(sys.argv) == 5, 'local volume arguments are invalid')
+            cluster, volume, node, capacity = sys.argv[1:]
+            require(os.environ.get('NODE_NAME') == node, 'local volume node identity differs from its contract')
+            with open('/proc/self/mountinfo', 'rb') as stream:
+                mounts = mount_paths(stream.read(4 * 1024 * 1024 + 1))
+            inspect('/host', cluster, volume, node, int(capacity), mounts)
+            print('Initial local-volume directory, node, filesystem and capacity checks passed.')
+            return 0
+        except Refusal as error:
+            print('Local storage refused: ' + str(error), file=sys.stderr)
+        except (OSError, ValueError, TypeError, UnicodeError):
+            print('Local storage refused: cannot safely verify the declared node directory.', file=sys.stderr)
+        return 1
+
+
+    if __name__ == '__main__':
+        raise SystemExit(main())
+kind: ConfigMap
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+    bareplane.io/cluster: lab
+    bareplane.io/component: storage
+  name: bareplane-storage-check
+  namespace: local-storage
+---
+allowVolumeExpansion: false
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    bareplane.io/cluster: lab
+    bareplane.io/component: storage
+  name: bareplane-local
+provisioner: kubernetes.io/no-provisioner
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+    bareplane.io/cluster: lab
+    bareplane.io/component: storage
+  name: local-check-94642b64679ab90a352602faeb053a86
+  namespace: local-storage
+spec:
+  activeDeadlineSeconds: 180
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bareplane-storage-check
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - args:
+            - lab
+            - first
+            - lab-control-1
+            - "1"
+          command:
+            - /usr/local/bin/python3
+            - -I
+            - -B
+            - /check/check.py
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          image: python:3.12.14-slim-bookworm
+          imagePullPolicy: IfNotPresent
+          name: check
+          resources:
+            limits:
+              cpu: 100m
+              memory: 64Mi
+            requests:
+              cpu: 10m
+              memory: 32Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - mountPath: /host
+              name: host
+              readOnly: true
+              recursiveReadOnly: Enabled
+            - mountPath: /check
+              name: check
+              readOnly: true
+      nodeName: lab-control-1
+      restartPolicy: Never
+      securityContext:
+        runAsGroup: 0
+        runAsUser: 0
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: bareplane-storage-check
+      tolerations:
+        - effect: NoSchedule
+          key: node-role.kubernetes.io/control-plane
+          operator: Exists
+      volumes:
+        - hostPath:
+            path: /
+            type: Directory
+          name: host
+        - configMap:
+            name: bareplane-storage-check
+          name: check
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    bareplane.io/cluster: lab
+    bareplane.io/component: storage
+  labels:
+    bareplane.io/local-volume: first
+  name: bareplane-local-c98337fb29a579369c6b5f293bdd144a
+spec:
+  accessModes:
+    - ReadWriteOnce
+  capacity:
+    storage: 1Gi
+  local:
+    path: /var/lib/bareplane/local-volumes/lab/first/data
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - lab-control-1
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: bareplane-local
+  volumeMode: Filesystem

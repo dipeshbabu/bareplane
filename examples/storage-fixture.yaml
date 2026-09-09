@@ -1,0 +1,36 @@
+apiVersion: bareplane.io/v1alpha1
+kind: BareplaneCluster
+metadata:
+  name: lab
+spec:
+  domain: lab.example.com
+  provider:
+    type: proxmox
+    endpoint: https://proxmox.example.com:8006
+  nodes:
+    - name: control
+      role: control-plane
+      count: 1
+      cpu: 2
+      memoryGB: 4
+      diskGB: 24
+  gitops:
+    repoURL: https://github.com/dipeshbabu/bareplane.git
+    revision: main
+    rootPath: examples/gitops/storage-root
+  features:
+    observability: false
+    gpu: false
+  profiles: [minimal]
+  components:
+    disabled: [metrics-server, cert-manager, observability, external-dns, secrets-sops, vault]
+  dns:
+    provider: manual
+  secrets:
+    provider: sops
+  storage:
+    strategy: local-static
+    volumes:
+      - name: first
+        node: lab-control-1
+        capacityGiB: 1
