@@ -24,6 +24,7 @@ from vault_acceptance import run_vault_acceptance
 from storage_acceptance import run_storage_acceptance
 from argo_receipt import verify_installation_rerun
 from gitops_retry import run_handoff_with_branch_retry
+from vm_resources import failure_diagnostics, host_counters
 
 
 IMAGE_URL = 'https://cloud-images.ubuntu.com/noble/20260826/noble-server-cloudimg-amd64.img'
@@ -86,6 +87,9 @@ def main():
     single_mode = recovery_mode or argocd_mode
     guests = []
     logs = []
+    resource_baseline = host_counters()
+    probe = None
+    names = []
     try:
         image = work / 'ubuntu.img'
         run(['curl', '-fsSL', '--retry', '3', '--max-time', '300', IMAGE_URL, '-o', image])
@@ -150,6 +154,8 @@ def main():
             return run(['ssh', '-F', '/dev/null', '-i', key, '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5',
                         '-o', 'StrictHostKeyChecking=yes', '-o', 'UserKnownHostsFile=' + str(known_hosts),
                         'root@' + hosts[name], command], **kwargs)
+
+        probe = ssh
 
         for index, name in enumerate(names):
             deadline = time.monotonic() + 240
@@ -474,6 +480,9 @@ def main():
             raise RuntimeError('An unchanged kubeconfig was rewritten')
         play('health.yaml')
         print('Three stacked-etcd control planes and one worker: joined, Ready, credentials cleaned, unchanged rerun.', flush=True)
+    except Exception:
+        failure_diagnostics(guests, resource_baseline, names, probe)
+        raise
     finally:
         for guest in guests:
             guest.terminate()
