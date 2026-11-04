@@ -59,7 +59,9 @@ jobs:
 
   join-topology:
     name: "${{ matrix.mode == 'local-storage' && 'Core local storage VM' || matrix.mode == 'observability' && 'Core observability VM' || matrix.mode == 'vault' && 'Core Vault VM' || matrix.mode == 'sops' && 'Core SOPS VM' || matrix.mode == 'external-dns' && 'Core DNS VM' || matrix.mode == 'metrics-server' && 'Core Metrics Server VM' || matrix.mode == 'kubelet-tls' && 'Kubelet serving TLS VMs' || matrix.mode == 'cert-manager' && 'Core cert-manager VM' || matrix.mode == 'handoff' && 'GitOps handoff VM' || matrix.mode == 'argocd' && 'Argo installation VM' || matrix.mode == 'recovery' && 'Bootstrap recovery VM' || matrix.mode == 'apply' && 'Bootstrap apply VMs' || 'Multi-node join VMs' }}"
-    runs-on: ubuntu-latest
+    # Keep nested-KVM acceptance on an explicit host release rather than a
+    # rolling runner alias; guest OS and lifecycle assertions remain pinned.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
