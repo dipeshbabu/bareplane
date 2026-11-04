@@ -79,7 +79,8 @@ class ReleasePolicyTests(unittest.TestCase):
 
     def test_publication_requires_exact_genuine_operator_evidence(self):
         request = dict(values(), RELEASE_PUBLISH='true', RELEASE_OPERATOR_EVIDENCE=json.dumps(evidence()))
-        result = policy.verify_release_policy(FakeAPI(), request, NOW)
+        api = FakeAPI()
+        result = policy.verify_release_policy(api, request, NOW, settings_api=api)
         self.assertTrue(result['publish'])
         self.assertEqual(len(result['operator_evidence_sha256']), 64)
         for change in [dict(source_sha='b' * 40), dict(operator='other'), dict(first_run='mocked'),
@@ -98,7 +99,9 @@ class ReleasePolicyTests(unittest.TestCase):
             api = FakeAPI()
             setattr(api, field, value)
             with self.subTest(field=field), self.assertRaises(ValueError):
-                policy.verify_release_policy(api, request, NOW)
+                policy.verify_release_policy(api, request, NOW, settings_api=api)
+        with self.assertRaisesRegex(ValueError, 'release-settings token'):
+            policy.verify_release_policy(FakeAPI(), request, NOW)
 
     def test_failed_missing_pending_skipped_and_changed_attempts_block_release(self):
         for state in ['failure', 'skipped', 'cancelled', None]:

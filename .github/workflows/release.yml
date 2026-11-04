@@ -52,6 +52,7 @@ jobs:
           RELEASE_VERSION: ${{ inputs.version }}
           RELEASE_PUBLISH: ${{ inputs.publish }}
           RELEASE_OPERATOR_EVIDENCE: ${{ inputs.operator_evidence }}
+          RELEASE_SETTINGS_TOKEN: ${{ secrets.RELEASE_SETTINGS_TOKEN }}
         run: python .github/scripts/release_policy.py
 
   build:
@@ -132,4 +133,5 @@ jobs:
           RELEASE_VERSION: ${{ inputs.version }}
           RELEASE_PUBLISH: ${{ inputs.publish }}
           RELEASE_OPERATOR_EVIDENCE: ${{ inputs.operator_evidence }}
+          RELEASE_SETTINGS_TOKEN: ${{ secrets.RELEASE_SETTINGS_TOKEN }}
         run: python hack/publish_release.py "$RUNNER_TEMP/candidate"

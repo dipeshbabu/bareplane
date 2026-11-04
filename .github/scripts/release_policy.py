@@ -57,7 +57,7 @@ def validate_context(values, default_branch, now=None):
     return result
 
 
-def verify_release_policy(api, values, now=None):
+def verify_release_policy(api, values, now=None, settings_api=None):
     default = api.get('')['default_branch']
     request = validate_context(values, default, now)
     source = request['source_sha']
@@ -69,9 +69,11 @@ def verify_release_policy(api, values, now=None):
     verify_jobs(api.collection('/actions/runs/' + str(run['id']) + '/jobs?filter=latest', 'jobs'))
     verify_same_attempt(run, api.get('/actions/runs/' + str(run['id'])))
     if request['publish']:
-        if api.get('/immutable-releases').get('enabled') is not True:
+        if settings_api is None:
+            raise ValueError('Publication requires a separate read-only release-settings token with Administration read access')
+        if settings_api.get('/immutable-releases').get('enabled') is not True:
             raise ValueError('Publication requires enabled immutable releases')
-        environment = api.get('/environments/release')
+        environment = settings_api.get('/environments/release')
         if not any(rule.get('type') == 'required_reviewers' and rule.get('reviewers')
                    for rule in environment.get('protection_rules', [])):
             raise ValueError('Publication requires a release environment with an explicit reviewer')
@@ -82,7 +84,9 @@ def main():
     token = os.environ.get('GH_TOKEN', '')
     if not token:
         raise ValueError('Release verification requires GitHub read access')
-    result = verify_release_policy(API(REPOSITORY, token), os.environ)
+    settings_token = os.environ.get('RELEASE_SETTINGS_TOKEN', '')
+    settings_api = API(REPOSITORY, settings_token) if settings_token else None
+    result = verify_release_policy(API(REPOSITORY, token), os.environ, settings_api=settings_api)
     output = os.environ.get('GITHUB_OUTPUT')
     if output:
         with open(output, 'a', encoding='utf-8') as stream:

@@ -41,6 +41,14 @@ settings before requesting publication. The environment approval is a final
 human review after candidate construction. No long-lived signing key is needed;
 the signing identity is the trusted GitHub workflow.
 
+The default `GITHUB_TOKEN` cannot read repository administration settings. Set a
+repository secret named `RELEASE_SETTINGS_TOKEN` containing a fine-grained token
+or short-lived GitHub App installation token restricted to this repository with
+**Administration: read** (and Metadata: read). It is used only to read immutable
+release/environment settings; `GITHUB_TOKEN` handles CI reads, attestations and
+release writes. Candidate-only builds need no settings token. Missing or expired
+settings access blocks publication rather than silently skipping these checks.
+
 Complete the [release checklist](release-checklist.md) in a genuine authorized
 Proxmox lab. Keep its detailed evidence privately. Dispatch with `publish=true`
 and a sanitized `operator_evidence` JSON object containing exactly these fields:

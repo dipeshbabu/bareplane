@@ -16,6 +16,7 @@ from release_artifacts import REPOSITORY, ReleaseError, require, verify_release
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / '.github/scripts'))
 from release_policy import WORKFLOW, verify_release_policy
+from verify_candidate import API
 
 
 class ReleaseAPI:
@@ -78,10 +79,10 @@ def verify_assets(assets, files):
                 and asset.get('digest') == 'sha256:' + expected['sha256'], 'Uploaded release asset differs from its verified local bytes')
 
 
-def publish(directory, values, api, run_gh=gh):
+def publish(directory, values, api, run_gh=gh, settings_api=None):
     directory = Path(directory).resolve()
     manifest = verify_release(directory)
-    policy = verify_release_policy(api, values)
+    policy = verify_release_policy(api, values, settings_api=settings_api)
     tag = check_publication(manifest, policy)
     files = {path.name: dict(size=path.stat().st_size, sha256=hashlib.sha256(path.read_bytes()).hexdigest())
              for path in directory.iterdir()}
@@ -111,7 +112,7 @@ def publish(directory, values, api, run_gh=gh):
     run_gh(['release', 'upload', tag, *[str(directory / name) for name in sorted(files)], '--repo', REPOSITORY])
     release_id = draft['id']
     verify_assets(api.collection('/releases/' + str(release_id) + '/assets', None), files)
-    final = verify_release_policy(api, values)
+    final = verify_release_policy(api, values, settings_api=settings_api)
     require((final['ci_run_id'], final['ci_attempt'], final['operator_evidence_sha256'])
             == (policy['ci_run_id'], policy['ci_attempt'], policy['operator_evidence_sha256']),
             'Release evidence changed before publication; draft remains private')
@@ -133,7 +134,9 @@ if __name__ == '__main__':
     try:
         token = os.environ.get('GH_TOKEN', '')
         require(bool(token), 'Release publication requires authorized GitHub access')
-        print(json.dumps(publish(args.directory, os.environ, ReleaseAPI(token)), sort_keys=True))
+        settings_token = os.environ.get('RELEASE_SETTINGS_TOKEN', '')
+        settings_api = API(REPOSITORY, settings_token) if settings_token else None
+        print(json.dumps(publish(args.directory, os.environ, ReleaseAPI(token), settings_api=settings_api), sort_keys=True))
     except (ReleaseError, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
         print(str(error) if isinstance(error, (ReleaseError, ValueError)) else 'Malformed release state; refusing publication', file=sys.stderr)
         raise SystemExit(1)
