@@ -22,6 +22,8 @@ from sops_acceptance import run_sops_acceptance
 from observability_acceptance import run_observability_acceptance
 from vault_acceptance import run_vault_acceptance
 from storage_acceptance import run_storage_acceptance
+from argo_receipt import verify_installation_rerun
+from gitops_retry import run_handoff_with_branch_retry
 
 
 IMAGE_URL = 'https://cloud-images.ubuntu.com/noble/20260826/noble-server-cloudimg-amd64.img'
@@ -310,8 +312,7 @@ def main():
                         raise RuntimeError('Minimal Argo did not record full owned readiness')
                     run(install)
                     current = json.loads((trust / 'argocd-ownership.json').read_text())
-                    if current != original:
-                        raise RuntimeError('Argo rerun changed owned resource identities or content')
+                    verify_installation_rerun(original, current)
                     if json.loads((trust / 'gitops.json').read_text())['stage'] != 'argocd-ready':
                         raise RuntimeError('CLI did not record Argo readiness')
                     if api('get', 'applications,applicationsets', '-n', 'argocd', '-o', 'json')['items']:
@@ -337,7 +338,7 @@ def main():
                         api('delete', '--raw=/apis/argoproj.io/v1alpha1/namespaces/argocd/applications/lab-root', '-f', '-',
                             data=dict(apiVersion='v1', kind='DeleteOptions', preconditions=dict(uid=foreign_root['metadata']['uid'])))
                         run(kubectl + ['wait', '--for=delete', 'application/lab-root', '-n', 'argocd', '--timeout=90s'])
-                        run(handoff)
+                        run_handoff_with_branch_retry(handoff, trust, run)
                         root = api('get', 'application', 'lab-root', '-n', 'argocd', '-o', 'json')
                         receipt = json.loads((trust / 'handoff.json').read_text())
                         if not receipt['complete'] or receipt['mode'] != 'following' or root['spec']['source']['targetRevision'] != 'main' or root['spec']['source'].get('kustomize'):
