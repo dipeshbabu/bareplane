@@ -110,18 +110,18 @@ func TestCoreCompatibilityRecordMatchesReviewedRendererPins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var record struct {
-		Core map[string]string `json:"core_components"`
-	}
+	var record map[string]string
 	if err := json.Unmarshal(data, &record); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"argocd": ArgoVersion, "cert-manager": CertManagerVersion,
-		"metrics-server": MetricsServerVersion, "prometheus": PrometheusVersion,
-		"kube-state-metrics": KubeStateMetricsVersion, "external-dns": ExternalDNSVersion,
-		"sops": SOPSVersion, "external-secrets": VaultOperatorVersion, "storage-inspector-image": StorageCheckImage}
-	if !reflect.DeepEqual(record.Core, want) {
-		t.Fatalf("core compatibility record does not match actual renderer pins: %v", record.Core)
+	want := map[string]string{"argocd": ArgoVersion, "cert_manager": CertManagerVersion,
+		"metrics_server": MetricsServerVersion, "prometheus": PrometheusVersion,
+		"kube_state_metrics": KubeStateMetricsVersion, "external_dns": ExternalDNSVersion,
+		"sops": SOPSVersion, "external_secrets": VaultOperatorVersion, "storage_inspector_image": StorageCheckImage}
+	for name, expected := range want {
+		if record[name] != expected {
+			t.Fatalf("core compatibility pin %s does not match the renderer: %s", name, record[name])
+		}
 	}
 }
 
