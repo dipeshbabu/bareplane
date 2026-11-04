@@ -5,9 +5,6 @@ from pathlib import Path
 import re
 
 
-FIELDS = {'MemTotal', 'MemAvailable', 'SwapTotal', 'SwapFree', 'oom_kill'}
-
-
 def parse_counters(data):
     result = {}
     for line in data.splitlines():
