@@ -1,0 +1,39 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+    annotations:
+        argocd.argoproj.io/sync-wave: "-10"
+        bareplane.io/cluster: lab
+        bareplane.io/component: metrics-server
+    name: lab-metrics-server
+    namespace: argocd
+spec:
+    destination:
+        namespace: metrics-server
+        server: https://kubernetes.default.svc
+    ignoreDifferences:
+        - group: apiregistration.k8s.io
+          jsonPointers:
+            - /spec/caBundle
+          kind: APIService
+          name: v1beta1.metrics.k8s.io
+    project: default
+    source:
+        path: components/metrics-server
+        repoURL: https://github.com/dipeshbabu/bareplane.git
+        targetRevision: main
+    syncPolicy:
+        automated:
+            allowEmpty: false
+            prune: false
+            selfHeal: false
+        retry:
+            backoff:
+                duration: 5s
+                maxDuration: 1m
+            limit: 5
+        syncOptions:
+            - ServerSideApply=true
+            - FailOnSharedResource=true
+            - DisableClientSideApplyMigration=true
+            - RespectIgnoreDifferences=true

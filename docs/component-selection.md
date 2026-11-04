@@ -44,6 +44,11 @@ The public M1/M2 fixture, reference Proxmox acceptance config, and schema/dispos
 
 Future core-component tests must prove their own Argo convergence before default enablement. The full core-profile acceptance test then composes those implemented capabilities through the registry. Optional storage or external DNS/secret integrations require their explicit contracts and operator-provided references, not guessed infrastructure or credentials.
 
+The [composed core fixture](core-profile.md) now tests those available capabilities
+together while retaining explicit intent for serving TLS, ephemeral history and
+local-volume inventory. The safe default remains Argo-only; no external credentials
+or storage provisioning are inferred.
+
 ## Ownership and changes
 
 Changing selections changes the desired GitOps payload. Review and publish the generated repository deliberately. Existing installation/handoff contracts refuse implicit adoption or replacement when inputs change. Once handed off, Argo owns steady-state reconciliation; do not try to reclaim components by re-running bootstrap installation. Upgrade/recovery workflows remain separately reviewed operations.

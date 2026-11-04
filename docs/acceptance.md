@@ -12,6 +12,12 @@ Independent disposable-VM jobs exercise real Debian/Ubuntu preparation, a three-
 
 The final `v0.1 acceptance` job requires every quality and VM dependency to succeed. Skipped, cancelled, missing, and failed dependencies are not acceptance. **Hosted CI is not evidence that a specific physical Proxmox environment passed.** The operator procedure below supplies that separate release-candidate evidence.
 
+The required [core-profile VM gate](core-profile.md) additionally composes the
+implemented certificate, verified metrics, observability and retained-storage
+capabilities through one exact-source root. It proves controlled failure recovery,
+PVC persistence and stable reconciliation without changing the explicit M1/M2
+fixture or enabling AI/data capabilities.
+
 ## Reference topology and compatibility
 
 Use [examples/acceptance.yaml](../examples/acceptance.yaml) as a documentation-only reference: three control-plane VMs and one worker, each 4 vCPU/8 GiB/64 GiB, Ubuntu 24.04 amd64, a common on-link IPv4 management network, and an unused API VIP. The documentation addresses and `.invalid` endpoint must be replaced. Guest names/addresses and VIP must match the actual approved lab network. DHCP reservations/static-address provisioning must be arranged explicitly; Bareplane does not infer addresses from arbitrary Terraform outputs.

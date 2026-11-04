@@ -109,6 +109,8 @@ The `minimal` profile starts with Argo CD. Use [explicit component selections](d
 
 Each integration has configuration and dependency requirements. AI/GPU and data profiles, broad storage systems, and upgrades remain future work.
 
+The [core convergence guide](docs/core-profile.md) covers the tested combination of certificates, metrics, observability and retained local storage.
+
 ## Reference
 
 Explore the available commands:

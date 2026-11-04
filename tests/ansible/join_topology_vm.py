@@ -25,6 +25,7 @@ from storage_acceptance import run_storage_acceptance
 from argo_receipt import verify_installation_rerun
 from gitops_retry import run_handoff_with_branch_retry
 from vm_resources import failure_diagnostics, host_counters
+from core_acceptance import run_core_acceptance
 
 
 IMAGE_URL = 'https://cloud-images.ubuntu.com/noble/20260826/noble-server-cloudimg-amd64.img'
@@ -81,8 +82,9 @@ def main():
     observability_mode = os.environ.get('BAREPLANE_TEST_OBSERVABILITY') == '1'
     vault_mode = os.environ.get('BAREPLANE_TEST_VAULT') == '1'
     storage_mode = os.environ.get('BAREPLANE_TEST_LOCAL_STORAGE') == '1'
+    core_mode = os.environ.get('BAREPLANE_TEST_CORE_PROFILE') == '1'
     cert_manager_mode = os.environ.get('BAREPLANE_TEST_CERT_MANAGER') == '1' or metrics_mode
-    handoff_mode = os.environ.get('BAREPLANE_TEST_GITOPS_HANDOFF') == '1' or cert_manager_mode or dns_mode or sops_mode or vault_mode or observability_mode or storage_mode
+    handoff_mode = os.environ.get('BAREPLANE_TEST_GITOPS_HANDOFF') == '1' or cert_manager_mode or dns_mode or sops_mode or vault_mode or observability_mode or storage_mode or core_mode
     argocd_mode = os.environ.get('BAREPLANE_TEST_ARGOCD_INSTALL') == '1' or handoff_mode
     single_mode = recovery_mode or argocd_mode
     guests = []
@@ -142,7 +144,7 @@ def main():
             log = (vm / 'console.log').open('wb')
             logs.append(log)
             guests.append(subprocess.Popen([
-                'qemu-system-x86_64', '-enable-kvm', '-cpu', 'host', '-smp', '2', '-m', '4096' if argocd_mode else '3072',
+                'qemu-system-x86_64', '-enable-kvm', '-cpu', 'host', '-smp', '2', '-m', '6144' if core_mode else '4096' if argocd_mode else '3072',
                 '-nographic', *([] if recovery_mode else ['-no-reboot']), '-drive', f'file={vm / "disk.qcow2"},if=virtio,format=qcow2',
                 '-drive', f'file={vm / "seed.img"},if=virtio,format=raw',
                 '-netdev', f'tap,id=net0,ifname={tap},script=no,downscript=no',
@@ -193,7 +195,7 @@ def main():
         config = yaml.safe_load((REPO / 'examples/bareplane.yaml').read_text())
         config['metadata']['name'] = 'lab'
         spec = config['spec']
-        spec['nodes'] = [dict(name='control', role='control-plane', count=1 if single_mode else 3, cpu=2, memoryGB=4 if argocd_mode else 3, diskGB=24)]
+        spec['nodes'] = [dict(name='control', role='control-plane', count=1 if single_mode else 3, cpu=2, memoryGB=6 if core_mode else 4 if argocd_mode else 3, diskGB=24)]
         if not single_mode:
             spec['nodes'].append(dict(name='worker', role='worker', count=1, cpu=2, memoryGB=3, diskGB=24))
         spec['features']['gpu'] = False
@@ -249,7 +251,7 @@ def main():
                     raise RuntimeError('A healthy CLI rerun reconfigured completed phases')
                 if (trust / '.operation.lock').exists():
                     raise RuntimeError('Successful apply did not release its operation lock')
-                if metrics_mode:
+                if metrics_mode or core_mode:
                     run([REPO / 'bin/bareplane', 'bootstrap', 'kubelet-tls', '--approve', 'lab', config_path])
                 if kubelet_tls_mode:
                     # All four real nodes cover the primary, joined control
@@ -388,6 +390,8 @@ def main():
                             run_vault_acceptance(kubectl, REPO, work)
                         if storage_mode:
                             run_storage_acceptance(kubectl, REPO, work, ssh)
+                        if core_mode:
+                            run_core_acceptance(kubectl, REPO, work, ssh, names, receipt)
                 if recovery_mode:
                     run([REPO / 'bin/bareplane', 'bootstrap', 'kubelet-tls', '--approve', 'lab', config_path])
                     run([REPO / 'bin/bareplane', 'bootstrap', 'diagnose', config_path])

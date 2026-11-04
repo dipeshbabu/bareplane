@@ -12,5 +12,16 @@
   "helm_bootstrap": "3.21.4",
   "guest_reference": "Ubuntu 24.04 amd64",
   "additional_ci_guest": "Debian 12 amd64",
-  "proxmox_evidence": "operator release-candidate acceptance required; not supplied by hosted CI"
+  "proxmox_evidence": "operator release-candidate acceptance required; not supplied by hosted CI",
+  "core_components": {
+    "argocd": "3.5.2",
+    "cert-manager": "1.21.1",
+    "metrics-server": "0.9.0",
+    "prometheus": "3.14.0",
+    "kube-state-metrics": "2.20.0",
+    "external-dns": "0.22.0",
+    "sops": "3.13.3",
+    "external-secrets": "2.10.0",
+    "storage-inspector-image": "python:3.12.14-slim-bookworm"
+  }
 }
