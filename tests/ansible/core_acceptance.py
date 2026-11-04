@@ -67,9 +67,14 @@ def sync_to_source(api, name, source, revision, uid):
         current = api('get', 'application', name, '-n', 'argocd', '-o', 'json')
         if current['metadata']['uid'] != uid or current['spec']['source'] != source:
             raise RuntimeError('Core recovery ownership or source changed')
-        if current.get('operation') == operation or converged(current, source, revision):
+        active = current.get('operation', {})
+        active_sync = active.get('sync', {})
+        if converged(current, source, revision):
             return
-        if current.get('operation'):
+        if (active_sync.get('revision') == revision and not active_sync.get('prune', False)
+                and set(active_sync) <= {'revision', 'prune', 'syncOptions', 'syncStrategy'}):
+            return  # A matching automated or ambiguously accepted operation is already progressing.
+        if active:
             raise RuntimeError('An unrelated core synchronization operation is active')
         try:
             api('patch', 'application', name, '-n', 'argocd', '--type=json', '-p', json.dumps([
@@ -82,6 +87,26 @@ def sync_to_source(api, name, source, revision, uid):
             if attempt == 2:
                 raise
             time.sleep(0.5)
+
+
+def application_diagnostics(name, current, source, revision):
+    status = current.get('status', {})
+    sync = status.get('sync', {})
+    compared = sync.get('comparedTo', {}).get('source', {})
+    messages = ' '.join(str(condition.get('message', '')) for condition in status.get('conditions', []))
+    messages += ' ' + str(status.get('operationState', {}).get('message', ''))
+    patterns = {'shared-resource': 'shared', 'manifest-generation': 'manifest', 'patch': 'patch',
+                'git-reference': 'revision', 'permission': 'forbidden', 'namespace': 'namespace',
+                'conflict': 'conflict', 'invalid': 'invalid'}
+    return dict(application=name, sync=sync.get('status'), health=status.get('health', {}).get('status'),
+                revisionMatches=sync.get('revision') == revision, specSourceMatches=current.get('spec', {}).get('source') == source,
+                comparedSourceMatches=compared == source,
+                comparedSourceDifferentFields=sorted(key for key in set(compared) | set(source) if compared.get(key) != source.get(key)),
+                operationActive=bool(current.get('operation')), operationPhase=status.get('operationState', {}).get('phase'),
+                conditionCount=len(status.get('conditions', [])),
+                errorCategories=[name for name, pattern in patterns.items() if pattern in messages.lower()],
+                resources=[dict(kind=item.get('kind'), name=item.get('name'), sync=item.get('status'),
+                                health=item.get('health', {}).get('status')) for item in status.get('resources', [])[:80]])
 
 
 def run_core_acceptance(kubectl, repository, work, ssh, nodes, ownership):
@@ -106,6 +131,7 @@ def run_core_acceptance(kubectl, repository, work, ssh, nodes, ownership):
     desired = core_source(source_repo, revision)
     api('patch', 'application', 'lab-root', '-n', 'argocd', '--type=json', '-p',
         json.dumps(root_source_patch(root, desired, ownership)), '-o', 'json')
+    sync_to_source(api, 'lab-root', desired, revision, root_uid)
 
     expected = {}
     for component in COMPONENTS:
@@ -117,17 +143,28 @@ def run_core_acceptance(kubectl, repository, work, ssh, nodes, ownership):
         return api('get', 'application', name, '-n', 'argocd', '-o', 'json')
 
     def wait_graph():
-        wait_for(lambda: converged(application('lab-root'), desired, revision),
-                 'The composed core root did not converge to its exact reviewed source', timeout=900)
-        for component, definition in expected.items():
-            name = definition['metadata']['name']
-            wait_for(lambda: converged(application(name), definition['spec']['source'], revision),
-                     'Core component did not converge: ' + component)
-            current = application(name)
-            annotations = current['metadata'].get('annotations', {})
-            if (annotations.get('bareplane.io/cluster') != 'lab'
-                    or not annotations.get('argocd.argoproj.io/tracking-id', '').startswith('lab-root:')):
-                raise RuntimeError('Core child Application has unrelated ownership: ' + component)
+        try:
+            wait_for(lambda: converged(application('lab-root'), desired, revision),
+                     'The composed core root did not converge to its exact reviewed source', timeout=900)
+            for component, definition in expected.items():
+                name = definition['metadata']['name']
+                wait_for(lambda: converged(application(name), definition['spec']['source'], revision),
+                         'Core component did not converge: ' + component)
+                current = application(name)
+                annotations = current['metadata'].get('annotations', {})
+                if (annotations.get('bareplane.io/cluster') != 'lab'
+                        or not annotations.get('argocd.argoproj.io/tracking-id', '').startswith('lab-root:')):
+                    raise RuntimeError('Core child Application has unrelated ownership: ' + component)
+        except RuntimeError:
+            sources = {'lab-root': desired, **{item['metadata']['name']: item['spec']['source'] for item in expected.values()}}
+            for name, source in sources.items():
+                try:
+                    print('Core application diagnostics: ' + json.dumps(application_diagnostics(name, application(name), source, revision)), flush=True)
+                except (RuntimeError, KeyError, TypeError):
+                    print('Core application diagnostics unavailable; response bodies were not exposed.', flush=True)
+            for component in ['cert-manager', 'metrics-server', 'observability', 'storage']:
+                ComponentAcceptance(kubectl, repository, component).readiness_diagnostics()
+            raise
 
     wait_graph()
     if application('lab-root')['metadata']['uid'] != root_uid or application('lab-argocd')['metadata']['uid'] != argo_uid:

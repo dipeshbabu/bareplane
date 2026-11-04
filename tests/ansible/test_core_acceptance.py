@@ -5,7 +5,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from core_acceptance import converged, core_source, root_source_patch, sync_to_source
+from core_acceptance import application_diagnostics, converged, core_source, root_source_patch, sync_to_source
 
 
 class CoreAcceptanceTests(unittest.TestCase):
@@ -82,6 +82,26 @@ class CoreAcceptanceTests(unittest.TestCase):
         with patch('core_acceptance.time.sleep'):
             sync_to_source(api, 'lab-observability', self.source, 'a' * 40, 'owned')
         self.assertEqual(len(writes), 1)
+
+    def test_matching_automated_sync_is_observed_without_replacing_it(self):
+        application = dict(metadata=dict(uid='owned', resourceVersion='1'), spec=dict(source=self.source),
+                           operation=dict(initiatedBy=dict(automated=True), sync=dict(revision='a' * 40)))
+        def api(*args):
+            self.assertEqual(args[0], 'get')
+            return copy.deepcopy(application)
+        sync_to_source(api, 'lab-root', self.source, 'a' * 40, 'owned')
+        application['operation']['sync']['manifests'] = ['unreviewed']
+        with self.assertRaises(RuntimeError):
+            sync_to_source(api, 'lab-root', self.source, 'a' * 40, 'owned')
+
+    def test_diagnostics_report_categories_without_exposing_error_messages(self):
+        app = dict(spec=dict(source=self.source), status=dict(sync=dict(status='OutOfSync', revision='b' * 40,
+            comparedTo=dict(source={})), health=dict(status='Progressing'),
+            conditions=[dict(type='ComparisonError', message='PRIVATE-SENTINEL invalid patch')]))
+        summary = application_diagnostics('lab-root', app, self.source, 'a' * 40)
+        self.assertNotIn('PRIVATE-SENTINEL', json.dumps(summary))
+        self.assertEqual(summary['errorCategories'], ['patch', 'invalid'])
+        self.assertFalse(summary['revisionMatches'])
 
     def test_success_requires_exact_source_commit_health_and_finished_operation(self):
         app = dict(status=dict(sync=dict(status='Synced', revision='a' * 40, comparedTo=dict(source=self.source)),
