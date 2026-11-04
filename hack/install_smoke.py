@@ -52,7 +52,7 @@ def smoke(directory, brew=False):
             # CI-only native smoke uses a fresh local tap and a loopback server.
             # The public generator always produces immutable release URLs.
             environment = dict(os.environ, HOMEBREW_NO_AUTO_UPDATE='1', HOMEBREW_NO_INSTALL_FROM_API='1')
-            command(['brew', 'tap-new', tap], env=environment)
+            command(['brew', 'tap-new', '--no-git', tap], env=environment)
             repository = Path(command(['brew', '--repository', tap], env=environment).strip())
             handler = functools.partial(SimpleHTTPRequestHandler, directory=str(directory))
             server = ThreadingHTTPServer(('127.0.0.1', 0), handler)

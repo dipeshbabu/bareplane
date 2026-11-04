@@ -19,7 +19,7 @@ class InstallTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix='bareplane-install-test-')
         self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
+        self.root = Path(temporary.name).resolve()
         build = FakeBuild(self.root)
         self.output = self.root / 'release'
         self.manifest = release.build_release(build.root, self.output, VERSION, SOURCE, build.run)
