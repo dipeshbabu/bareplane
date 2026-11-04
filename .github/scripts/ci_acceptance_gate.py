@@ -4,7 +4,7 @@ import json
 import os
 
 
-REQUIRED = {'quality', 'host-prepare', 'join-topology', 'release-artifacts'}
+REQUIRED = {'quality', 'host-prepare', 'join-topology', 'release-artifacts', 'release-install'}
 
 
 def verify(needs):
