@@ -214,7 +214,7 @@ func application(cfg config.Config, component, sourcePath, wave string, namespac
 		// Kubernetes' volume binder owns the live claim UID. Argo must not
 		// erase or rewrite that binding while reconciling retained static PVs.
 		result["spec"].(map[string]any)["ignoreDifferences"] = []map[string]any{
-			{"group": "", "kind": "PersistentVolume", "jsonPointers": []string{"/spec/claimRef"}},
+			{"kind": "PersistentVolume", "jsonPointers": []string{"/spec/claimRef"}},
 		}
 		policy := result["spec"].(map[string]any)["syncPolicy"].(map[string]any)
 		policy["syncOptions"] = append(policy["syncOptions"].([]string), "RespectIgnoreDifferences=true")

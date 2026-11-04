@@ -2,8 +2,11 @@ package gitops
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -97,5 +100,52 @@ func TestStorageRequiresExplicitInventoryAndQuotesScalarNames(t *testing.T) {
 	cfg.Spec.Storage = nil
 	if files, err := Render(cfg); err == nil || files != nil {
 		t.Fatal("unconfigured storage rendered")
+	}
+}
+
+func TestStorageIgnoreRuleSurvivesArgoApplicationJSONRoundTrip(t *testing.T) {
+	files, err := Render(storageFixture(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var application map[string]any
+	if err := yaml.Unmarshal(files["examples/gitops/storage-root/applications/storage.yaml"], &application); err != nil {
+		t.Fatal(err)
+	}
+	spec := application["spec"].(map[string]any)
+	before, err := json.Marshal(spec["ignoreDifferences"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Match the pinned Argo Application API's optional core-group field. Its
+	// controller serializes this typed structure when updating Applications.
+	var rules []struct {
+		Group        string   `json:"group,omitempty"`
+		Kind         string   `json:"kind"`
+		JSONPointers []string `json:"jsonPointers,omitempty"`
+	}
+	if err := json.Unmarshal(before, &rules); err != nil {
+		t.Fatal(err)
+	}
+	if len(rules) != 1 || rules[0].Group != "" || rules[0].Kind != "PersistentVolume" || !reflect.DeepEqual(rules[0].JSONPointers, []string{"/spec/claimRef"}) {
+		t.Fatal("storage must ignore only the live PV claim binding")
+	}
+	after, err := json.Marshal(rules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var desired, observed any
+	if err := json.Unmarshal(before, &desired); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(after, &observed); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(desired, observed) {
+		t.Fatal("controller JSON normalization would leave the parent permanently OutOfSync")
+	}
+	policy := spec["syncPolicy"].(map[string]any)
+	if !strings.Contains(fmt.Sprint(policy["syncOptions"]), "RespectIgnoreDifferences=true") {
+		t.Fatal("storage synchronization must preserve the live claim binding")
 	}
 }
