@@ -163,6 +163,63 @@ func TestPlanInvalidatesPreviousManifestBeforeFailedReplan(t *testing.T) {
 	}
 }
 
+func TestPlanRejectsInputsChangedDuringExecution(t *testing.T) {
+	for _, phase := range []string{"init", "plan"} {
+		for _, input := range []string{"configuration", "generated Terraform", "dependency lock"} {
+			if phase == "init" && input == "dependency lock" {
+				continue // Initialization intentionally establishes the dependency lock.
+			}
+			t.Run(phase+"/"+input, func(t *testing.T) {
+				configPath, workspace := setupTerraformProject(t)
+				runner := runnerFunc(func(_ context.Context, command Command) (int, error) {
+					if command.Args[0] == "init" {
+						if err := os.WriteFile(filepath.Join(command.Dir, terraformLockFilename), []byte("lock-v1\n"), 0o644); err != nil {
+							t.Fatal(err)
+						}
+					} else if command.Args[0] == "plan" {
+						if err := os.WriteFile(workspace.PlanFile, []byte("saved-plan"), 0o600); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if command.Args[0] == phase {
+						var path string
+						var data []byte
+						switch input {
+						case "configuration":
+							path = configPath
+							original, err := os.ReadFile(path)
+							if err != nil {
+								t.Fatal(err)
+							}
+							data = bytes.Replace(original, []byte("cpu: 4"), []byte("cpu: 8"), 1)
+						case "generated Terraform":
+							path = filepath.Join(workspace.GeneratedDir, "main.tf.json")
+							data = []byte("{\"changed\":true}\n")
+						case "dependency lock":
+							path = workspace.LockFile
+							data = []byte("different-provider-lock\n")
+						}
+						if err := os.WriteFile(path, data, 0o600); err != nil {
+							t.Fatal(err)
+						}
+					}
+					return 0, nil
+				})
+				_, err := Plan(context.Background(), validOptions(configPath, runner))
+				if err == nil || !strings.Contains(err.Error(), "changed during planning") {
+					t.Fatalf("changed %s was attested: %v", input, err)
+				}
+				if _, err := os.Stat(workspace.PlanManifestFile); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("changed input left an applicable manifest: %v", err)
+				}
+				if _, err := os.Stat(workspace.PlanFile); err != nil {
+					t.Fatalf("diagnostic saved plan was removed: %v", err)
+				}
+			})
+		}
+	}
+}
+
 func TestPlanRejectsSymlinkedPersistentLock(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink behavior depends on Windows privileges")

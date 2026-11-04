@@ -117,6 +117,17 @@ func Plan(ctx context.Context, options PlanOptions) (result PlanResult, err erro
 	if err := removeRegularFileIfPresent(workspace.PlanFile); err != nil {
 		return PlanResult{}, fmt.Errorf("prepare Terraform plan path: %w", err)
 	}
+	// Capture inputs before invoking Terraform. Hashing only after execution can
+	// attest a newer configuration or render than the saved plan actually used.
+	inputs := planInputs{}
+	inputs.configSHA256, err = hashRegularFile(options.ConfigPath, maxMetadataHashBytes)
+	if err != nil {
+		return PlanResult{}, fmt.Errorf("snapshot Bareplane configuration: %w", err)
+	}
+	inputs.generatedSHA256, err = hashGeneratedDirectory(workspace.GeneratedDir)
+	if err != nil {
+		return PlanResult{}, fmt.Errorf("snapshot generated Terraform: %w", err)
+	}
 
 	terraformVersion, err := readTerraformVersion(
 		ctx,
@@ -155,6 +166,11 @@ func Plan(ctx context.Context, options PlanOptions) (result PlanResult, err erro
 	if _, err := copyIfExists(generatedLock, workspace.LockFile, 0o600); err != nil {
 		return PlanResult{}, fmt.Errorf("persist Terraform dependency lock: %w", err)
 	}
+	// Initialization may create the first lock. Bind it before the plan runs.
+	inputs.providerLockSHA256, err = hashRegularFile(workspace.LockFile, maxMetadataHashBytes)
+	if err != nil {
+		return PlanResult{}, fmt.Errorf("snapshot Terraform dependency lock: %w", err)
+	}
 
 	planArgs := []string{
 		"plan",
@@ -185,13 +201,13 @@ func Plan(ctx context.Context, options PlanOptions) (result PlanResult, err erro
 	default:
 		return PlanResult{}, fmt.Errorf("terraform plan exited with code %d", exitCode)
 	}
-	if err := finalizeSuccessfulPlan(options.ConfigPath, workspace, terraformVersion); err != nil {
+	if err := finalizeSuccessfulPlan(options.ConfigPath, workspace, terraformVersion, inputs); err != nil {
 		return PlanResult{}, err
 	}
 	return PlanResult{Changes: changes}, nil
 }
 
-func finalizeSuccessfulPlan(configPath string, workspace project.TerraformWorkspace, terraformVersion string) error {
+func finalizeSuccessfulPlan(configPath string, workspace project.TerraformWorkspace, terraformVersion string, inputs planInputs) error {
 	if err := securePlanIfPresent(workspace.PlanFile); err != nil {
 		return err
 	}
@@ -201,7 +217,7 @@ func finalizeSuccessfulPlan(configPath string, workspace project.TerraformWorksp
 		}
 		return fmt.Errorf("inspect Terraform saved plan: %w", err)
 	}
-	if _, err := CreatePlanManifest(configPath, workspace, terraformVersion); err != nil {
+	if _, err := createPlanManifest(configPath, workspace, terraformVersion, &inputs); err != nil {
 		return fmt.Errorf("create Terraform plan manifest: %w", err)
 	}
 	return nil
