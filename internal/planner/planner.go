@@ -87,6 +87,11 @@ func compareMachine(cluster string, desired topology.Machine, observed provider.
 		change.Reason = fmt.Sprintf("owned resource %s is a template, not a mutable machine", observed.ID)
 		return change
 	}
+	if !observed.MachineCompatible {
+		change.Action = provider.ActionConflict
+		change.Reason = fmt.Sprintf("observed %s %s is not compatible with a desired machine", observedKind(observed), observed.ID)
+		return change
+	}
 
 	drift := capacityDrift(desired, observed)
 	if len(drift) == 0 {

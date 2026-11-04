@@ -80,16 +80,17 @@ func (p *RuntimeProvider) Discover(ctx context.Context) (provider.Inventory, err
 			kind = "guest"
 		}
 		nodes = append(nodes, provider.Node{
-			ID:       fmt.Sprintf("%s/%d", kind, resource.VMID),
-			Name:     strings.TrimSpace(resource.Name),
-			Kind:     kind,
-			Host:     strings.TrimSpace(resource.Node),
-			Status:   strings.TrimSpace(resource.Status),
-			CPU:      resource.MaxCPU,
-			MemoryGB: memoryGB,
-			DiskGB:   diskGB,
-			Template: resource.Template != 0,
-			Tags:     parseTags(resource.Tags),
+			ID:                fmt.Sprintf("%s/%d", kind, resource.VMID),
+			Name:              strings.TrimSpace(resource.Name),
+			Kind:              kind,
+			Host:              strings.TrimSpace(resource.Node),
+			Status:            strings.TrimSpace(resource.Status),
+			CPU:               resource.MaxCPU,
+			MemoryGB:          memoryGB,
+			DiskGB:            diskGB,
+			Template:          resource.Template != 0,
+			Tags:              parseTags(resource.Tags),
+			MachineCompatible: kind == "qemu",
 		})
 	}
 

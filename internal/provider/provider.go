@@ -39,6 +39,10 @@ type Node struct {
 	GPU      bool
 	Template bool
 	Tags     []string
+	// MachineCompatible is set only when the provider verifies that this
+	// resource type can satisfy a desired machine. Ownership tags alone do not
+	// establish compatibility; unknown resource types remain incompatible.
+	MachineCompatible bool
 }
 
 type Plan struct {

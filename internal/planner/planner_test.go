@@ -120,6 +120,26 @@ func TestBuildConflictsOnOwnedTemplate(t *testing.T) {
 	}
 }
 
+func TestBuildConflictsOnIncompatibleOwnedResources(t *testing.T) {
+	for _, drift := range []bool{false, true} {
+		desired := testTopology(t)
+		machine := desired.Machines[0]
+		observed := managedNode(t, desired.Cluster, machine)
+		observed.MachineCompatible = false
+		if drift {
+			observed.CPU++
+		}
+		plan, err := Build(desired, provider.Inventory{Nodes: []provider.Node{observed}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		change := findChange(t, plan, machine.Name)
+		if change.Action != provider.ActionConflict || !strings.Contains(change.Reason, "not compatible") {
+			t.Fatalf("incompatible resource accepted (drift=%t): %#v", drift, change)
+		}
+	}
+}
+
 func TestBuildIgnoresStatusHostAndUndiscoverableGPUForDrift(t *testing.T) {
 	desired := testTopology(t)
 	machine := desired.Machines[0]
@@ -201,14 +221,15 @@ func managedNode(t *testing.T, cluster string, machine topology.Machine) provide
 		t.Fatal(err)
 	}
 	return provider.Node{
-		ID:       "qemu/100",
-		Name:     machine.Name,
-		Kind:     "qemu",
-		CPU:      machine.CPU,
-		MemoryGB: machine.MemoryGB,
-		DiskGB:   machine.DiskGB,
-		GPU:      machine.GPU,
-		Tags:     tags,
+		ID:                "qemu/100",
+		Name:              machine.Name,
+		Kind:              "qemu",
+		CPU:               machine.CPU,
+		MemoryGB:          machine.MemoryGB,
+		DiskGB:            machine.DiskGB,
+		GPU:               machine.GPU,
+		Tags:              tags,
+		MachineCompatible: true,
 	}
 }
 
