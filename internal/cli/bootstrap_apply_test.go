@@ -34,6 +34,24 @@ func TestBootstrapApplyRejectsRawArgumentsAndCheckMode(t *testing.T) {
 	}
 }
 
+func TestBootstrapRecoveryUsesItsOwnCommandInDiagnostics(t *testing.T) {
+	options := bootstrapapply.Options{RecoverCredentials: true}
+	var stdout, stderr bytes.Buffer
+	if code := runBootstrapApply(nil, &stdout, &stderr, options); code != 2 {
+		t.Fatalf("missing approval returned %d", code)
+	}
+	if !strings.Contains(stderr.String(), "bootstrap recover-kubeconfig --approve") {
+		t.Fatalf("recovery suggested a different operation: %s", stderr.String())
+	}
+	stderr.Reset()
+	if code := runBootstrapApply([]string{"--approve", "lab", filepath.Join(t.TempDir(), "missing.yaml")}, &stdout, &stderr, options); code != 1 {
+		t.Fatalf("missing configuration returned %d", code)
+	}
+	if !strings.HasPrefix(stderr.String(), "bootstrap recover-kubeconfig:") {
+		t.Fatalf("recovery failure was mislabeled: %s", stderr.String())
+	}
+}
+
 func TestBootstrapApplyCLIReportsSafeProgressAndRecovery(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "examples", "bareplane.yaml"))
 	if err != nil {
@@ -94,5 +112,21 @@ func TestBootstrapApplyCLIReportsSafeProgressAndRecovery(t *testing.T) {
 	options.Runner = func(context.Context, bootstrapapply.Request) error { return nil }
 	if code := runBootstrapApply(args, &stdout, &stderr, options); code != 0 || !strings.Contains(stdout.String(), "cluster is healthy") {
 		t.Fatalf("resume failed: %d %s %s", code, stdout.String(), stderr.String())
+	}
+	options.RecoverCredentials = true
+	options.Runner = func(context.Context, bootstrapapply.Request) error { return errors.New("PRIVATE-RECOVERY-SENTINEL") }
+	stdout.Reset()
+	stderr.Reset()
+	if code := runBootstrapApply(args, &stdout, &stderr, options); code != 1 ||
+		!strings.Contains(stderr.String(), "retry: bareplane bootstrap recover-kubeconfig --approve") ||
+		strings.Contains(stdout.String()+stderr.String(), "SENTINEL") {
+		t.Fatalf("unsafe recovery retry instruction: %d %s %s", code, stdout.String(), stderr.String())
+	}
+	options.Runner = func(context.Context, bootstrapapply.Request) error { return nil }
+	stdout.Reset()
+	stderr.Reset()
+	if code := runBootstrapApply(args, &stdout, &stderr, options); code != 0 ||
+		!strings.Contains(stdout.String(), "kubeconfig recovered and cluster health verified") {
+		t.Fatalf("recovery retry failed: %d %s %s", code, stdout.String(), stderr.String())
 	}
 }

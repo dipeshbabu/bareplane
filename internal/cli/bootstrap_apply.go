@@ -24,6 +24,8 @@ func runBootstrapApply(args []string, stdout, stderr io.Writer, dependencies ...
 	command := "apply"
 	if options.KubeletServingTLS {
 		command = "kubelet-tls"
+	} else if options.RecoverCredentials {
+		command = "recover-kubeconfig"
 	}
 	usage := "usage: bareplane bootstrap " + command + " --approve <cluster-name> [path]"
 	flags := flag.NewFlagSet("bootstrap "+command, flag.ContinueOnError)
@@ -59,6 +61,8 @@ func runBootstrapApply(args []string, stdout, stderr io.Writer, dependencies ...
 	}
 	if options.KubeletServingTLS {
 		fmt.Fprintln(stdout, "inventory-bound kubelet serving TLS and cluster health verified; private keys remain on their owners")
+	} else if options.RecoverCredentials {
+		fmt.Fprintln(stdout, "private project kubeconfig recovered and cluster health verified")
 	} else {
 		fmt.Fprintln(stdout, "bootstrap cluster is healthy; private progress and kubeconfig are ready")
 	}
