@@ -72,6 +72,8 @@ It does not record environment variables, API tokens, private keys, or credentia
 
 Verification recomputes every digest and checks the Terraform version. Editing the configuration, rerendering Terraform, changing the provider lock, modifying the saved plan, or changing Terraform versions makes the plan stale.
 
+Planning snapshots the configuration and generated Terraform before invoking Terraform, then binds the dependency lock established by initialization before the plan runs. If those inputs change during execution, Bareplane refuses to create an attestation. The saved plan remains a private diagnostic artifact; inspect the changes, rerender as needed, and run a new plan before applying.
+
 Bareplane removes any previous plan manifest before a new plan starts. Therefore a failed replan cannot leave an older plan marked as valid.
 
 The attestation is the authorization boundary for [Terraform apply](terraform-apply.md). `bareplane terraform apply` refuses to mutate infrastructure unless the manifest still matches the exact current project context and the operator supplies the exact cluster name as approval.

@@ -34,7 +34,17 @@ type PlanManifest struct {
 	PlanSHA256         string `json:"planSHA256"`
 }
 
+type planInputs struct {
+	configSHA256       string
+	generatedSHA256    string
+	providerLockSHA256 string
+}
+
 func CreatePlanManifest(configPath string, workspace project.TerraformWorkspace, terraformVersion string) (PlanManifest, error) {
+	return createPlanManifest(configPath, workspace, terraformVersion, nil)
+}
+
+func createPlanManifest(configPath string, workspace project.TerraformWorkspace, terraformVersion string, expected *planInputs) (PlanManifest, error) {
 	clusterName, err := manifestClusterName(configPath)
 	if err != nil {
 		return PlanManifest{}, err
@@ -48,13 +58,22 @@ func CreatePlanManifest(configPath string, workspace project.TerraformWorkspace,
 	if err != nil {
 		return PlanManifest{}, fmt.Errorf("hash Bareplane configuration: %w", err)
 	}
+	if expected != nil && configDigest != expected.configSHA256 {
+		return PlanManifest{}, errors.New("Bareplane configuration changed during planning; rerender and run terraform plan again")
+	}
 	generatedDigest, err := hashGeneratedDirectory(workspace.GeneratedDir)
 	if err != nil {
 		return PlanManifest{}, fmt.Errorf("hash generated Terraform: %w", err)
 	}
+	if expected != nil && generatedDigest != expected.generatedSHA256 {
+		return PlanManifest{}, errors.New("generated Terraform changed during planning; rerender and run terraform plan again")
+	}
 	lockDigest, err := hashRegularFile(workspace.LockFile, maxMetadataHashBytes)
 	if err != nil {
 		return PlanManifest{}, fmt.Errorf("hash Terraform dependency lock: %w", err)
+	}
+	if expected != nil && lockDigest != expected.providerLockSHA256 {
+		return PlanManifest{}, errors.New("Terraform dependency lock changed during planning; inspect it and run terraform plan again")
 	}
 	planDigest, err := hashRegularFile(workspace.PlanFile, 0)
 	if err != nil {
