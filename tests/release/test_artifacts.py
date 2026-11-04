@@ -36,6 +36,7 @@ class FakeBuild:
         self.root = directory / 'source'
         self.root.mkdir()
         (self.root / 'LICENSE').write_text('Bareplane MIT license\n')
+        (self.root / 'go.mod').write_text('module ' + release.MODULE + '\n\ngo 1.23\n')
         self.goroot = directory / 'go'
         self.goroot.mkdir()
         (self.goroot / 'LICENSE').write_text('Go BSD license\n')
@@ -47,13 +48,22 @@ class FakeBuild:
         self.dirty = False
         self.drift_after_build = None
 
-    def run(self, args, root, environment=None):
+    def run(self, args, root, environment=None, binary=False):
         if args[:3] == ['git', 'rev-parse', 'HEAD']:
             return SOURCE + '\n'
         if args[:2] == ['git', 'status']:
             return ' M go.mod\n' if self.dirty else ''
         if args[:2] == ['git', 'show']:
             return str(EPOCH) + '\n'
+        if args[:2] == ['git', 'archive']:
+            buffer = io.BytesIO()
+            with tarfile.open(fileobj=buffer, mode='w') as archive:
+                for name in ['LICENSE', 'go.mod']:
+                    data = (self.root / name).read_text().replace('\r\n', '\n').encode()
+                    member = tarfile.TarInfo(name)
+                    member.size, member.mode, member.mtime = len(data), 0o644, EPOCH
+                    archive.addfile(member, io.BytesIO(data))
+            return buffer.getvalue()
         if args == ['go', 'env', 'GOVERSION']:
             return 'go1.27.3\n'
         if args == ['go', 'env', 'GOROOT']:
@@ -216,12 +226,38 @@ class ReleaseArtifactTests(unittest.TestCase):
         self.assertNotIn('GOOS', environment)
         self.assertNotIn('SECRET', str(environment))
         self.assertNotIn('PYTHONPATH', environment)
+        self.assertEqual(environment['GOENV'], 'off')
 
     def test_linked_module_replacements_are_refused(self):
         data = ('/binary: go1.27.3\n\tpath\t' + release.MODULE + '/cmd/bareplane\n'
                 '\tdep\texample.com/module\tv1.0.0\n\t=>\t../local\n')
         with self.assertRaisesRegex(release.ReleaseError, 'replaced'):
             release.parse_build_info(data)
+
+    def test_normalized_snapshot_excludes_ignored_checkout_data_and_line_endings(self):
+        (self.build.root / 'ignored-local.go').write_text('unreviewed local content')
+        (self.build.root / 'LICENSE').write_bytes(b'Bareplane MIT license\r\n')
+        destination = self.directory / 'snapshot'
+        files = release.snapshot_source(self.build.root, SOURCE, destination, self.build.run)
+        self.assertEqual(set(files), {'LICENSE', 'go.mod'})
+        self.assertEqual((destination / 'LICENSE').read_bytes(), b'Bareplane MIT license\n')
+        (destination / 'go.mod').write_text('changed')
+        with self.assertRaisesRegex(release.ReleaseError, 'changed'):
+            release.check_snapshot(destination, files)
+
+    def test_source_snapshot_rejects_links_traversal_and_windows_drive_paths(self):
+        for index, name in enumerate(['../escape', '/escape', 'C:/escape', '\\escape', 'linked']):
+            buffer = io.BytesIO()
+            with tarfile.open(fileobj=buffer, mode='w') as archive:
+                member = tarfile.TarInfo(name)
+                member.mode = 0o644
+                if name == 'linked':
+                    member.type, member.linkname = tarfile.SYMTYPE, '/unrelated'
+                archive.addfile(member)
+            def run(*args):
+                return buffer.getvalue()
+            with self.subTest(name=name), self.assertRaises(release.ReleaseError):
+                release.snapshot_source(self.build.root, SOURCE, self.directory / ('bad-source-' + str(index)), run)
 
 
 if __name__ == '__main__':

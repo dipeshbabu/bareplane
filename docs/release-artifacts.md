@@ -36,7 +36,10 @@ the full notice text is distributed rather than guessed.
 
 ## Build and verification boundary
 
-Builds disable CGO, workspace/config overlays, automatic toolchain switching and
+Builds compile a normalized `git archive` of the exact source, so Windows checkout
+line endings and ignored local files cannot alter embedded payloads. The normalized
+source is checked for changes throughout compilation. Builds disable CGO,
+workspace/config overlays, automatic toolchain switching and
 ambient execution overrides. Public modules are downloaded through the checksum-
 verified Go proxy and verified before compiling. Local module replacements are
 refused. `-trimpath`, fixed version/commit/date values, an empty linker build ID,

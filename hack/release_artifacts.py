@@ -9,7 +9,9 @@ import io
 import json
 import os
 from pathlib import Path
+from pathlib import PurePosixPath
 import re
+import shutil
 import subprocess
 import tarfile
 from urllib.parse import quote
@@ -24,6 +26,7 @@ DIGEST = re.compile(r'[0-9a-f]{64}\Z')
 MAX_TEXT = 2 * 1024 * 1024
 MAX_BINARY = 128 * 1024 * 1024
 MAX_ARCHIVE = 256 * 1024 * 1024
+MAX_SOURCE = 128 * 1024 * 1024
 
 
 class ReleaseError(Exception):
@@ -48,12 +51,13 @@ def released_go(version):
     return bool(match and int(match[1]) >= 23)
 
 
-def command(args, root, environment=None):
+def command(args, root, environment=None, binary=False):
     result = subprocess.run(args, cwd=root, env=environment, capture_output=True, timeout=600)
-    require(len(result.stdout) <= MAX_TEXT and len(result.stderr) <= MAX_TEXT, 'Build command output exceeded its bound')
+    require(len(result.stdout) <= (MAX_SOURCE if binary else MAX_TEXT) and len(result.stderr) <= MAX_TEXT,
+            'Build command output exceeded its bound')
     if result.returncode:
         raise ReleaseError(Path(args[0]).name + ' failed: ' + result.stderr.decode(errors='replace')[-4000:])
-    return result.stdout.decode('utf-8')
+    return result.stdout if binary else result.stdout.decode('utf-8')
 
 
 def build_environment(base=None):
@@ -75,6 +79,45 @@ def check_source(root, source, run=command):
     epoch = run(['git', 'show', '-s', '--format=%ct', source], root).strip()
     require(epoch.isdigit() and 0 < int(epoch) < 2**32, 'Source timestamp is not a bounded Git commit timestamp')
     return int(epoch)
+
+
+def snapshot_source(root, source, destination, run=command):
+    data = run(['git', 'archive', '--format=tar', source], root, None, True)
+    require(isinstance(data, bytes) and len(data) <= MAX_SOURCE, 'Source snapshot is missing or oversized')
+    destination.mkdir(mode=0o700)
+    names = set()
+    with tarfile.open(fileobj=io.BytesIO(data), mode='r:') as archive:
+        for index, member in enumerate(archive):
+            path = PurePosixPath(member.name)
+            require(index < 10000 and not path.is_absolute() and '..' not in path.parts
+                    and not any(character in member.name for character in ('\\', ':', '\x00'))
+                    and len(member.name) <= 1024 and (member.isfile() or member.isdir()),
+                    'Source snapshot contains unsafe paths, links or an excessive inventory')
+            identity = str(path).casefold()
+            require(identity not in names, 'Source snapshot has colliding portable paths')
+            names.add(identity)
+            target = destination.joinpath(*path.parts)
+            require(target.resolve().is_relative_to(destination.resolve()), 'Source snapshot path escaped its owned directory')
+            if member.isdir():
+                target.mkdir(parents=True, exist_ok=True)
+            else:
+                require(0 <= member.size <= 16 * 1024 * 1024, 'Source file exceeded its size bound')
+                require(not target.exists(), 'Source snapshot would overwrite another path')
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(archive.extractfile(member).read(member.size + 1))
+                target.chmod(member.mode & 0o755)
+    require((destination / 'go.mod').is_file(), 'Source snapshot has no module contract')
+    return {path.relative_to(destination).as_posix(): digest(path.read_bytes())
+            for path in destination.rglob('*') if path.is_file()}
+
+
+def check_snapshot(root, expected):
+    current = {}
+    for path in root.rglob('*'):
+        require(not path.is_symlink(), 'Normalized build source acquired a redirected path')
+        if path.is_file():
+            current[path.relative_to(root).as_posix()] = digest(path.read_bytes())
+    require(current == expected, 'Normalized build source changed during compilation')
 
 
 def parse_json_stream(data):
@@ -195,28 +238,32 @@ def build_release(root, output, version, source, run=command):
     toolchain = run(['go', 'env', 'GOVERSION'], root, environment).strip()
     require(released_go(toolchain), 'A released Go 1.23 or newer toolchain is required')
     goroot = Path(run(['go', 'env', 'GOROOT'], root, environment).strip())
-    modules = parse_json_stream(run(['go', 'list', '-m', '-json', 'all'], root, environment))
-    require(all(not item.get('Replace') for item in modules), 'Release source cannot use module replacements')
-    run(['go', 'mod', 'download'], root, environment)
-    run(['go', 'mod', 'verify'], root, environment)
-    module_locations = {(item['Path'], item.get('Version')): item.get('Dir')
-                        for item in parse_json_stream(run(['go', 'list', '-m', '-json', 'all'], root, environment))}
     require(not output.exists(), 'Release output must be a new directory')
     output.mkdir(mode=0o700, parents=True)
+    normalized = output / '.source'
+    source_files = snapshot_source(root, source, normalized, run)
+    modules = parse_json_stream(run(['go', 'list', '-m', '-json', 'all'], normalized, environment))
+    require(all(not item.get('Replace') for item in modules), 'Release source cannot use module replacements')
+    run(['go', 'mod', 'download'], normalized, environment)
+    run(['go', 'mod', 'verify'], normalized, environment)
+    module_locations = {(item['Path'], item.get('Version')): item.get('Dir')
+                        for item in parse_json_stream(run(['go', 'list', '-m', '-json', 'all'], normalized, environment))}
+    check_snapshot(normalized, source_files)
     staging = output / '.build'
     staging.mkdir(mode=0o700)
     created = dt.datetime.fromtimestamp(epoch, dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-    license_text = text_file(root / 'LICENSE').encode()
+    license_text = text_file(normalized / 'LICENSE').encode()
     records, linked_modules = [], None
     ldflags = '-s -w -buildid= ' + ' '.join('-X ' + MODULE + '/internal/version.' + name + '=' + value
                                          for name, value in [('Version', version), ('Commit', source), ('Date', created)])
     for target_os, target_arch in TARGETS:
         check_source(root, source, run)
+        check_snapshot(normalized, source_files)
         target_env = dict(environment, GOOS=target_os, GOARCH=target_arch)
         binary = staging / (target_os + '-' + target_arch)
         run(['go', 'build', '-mod=readonly', '-trimpath', '-buildvcs=false', '-ldflags', ldflags,
-             '-o', str(binary), './cmd/bareplane'], root, target_env)
-        info = parse_build_info(run(['go', 'version', '-m', str(binary)], root, environment))
+             '-o', str(binary), './cmd/bareplane'], normalized, target_env)
+        info = parse_build_info(run(['go', 'version', '-m', str(binary)], normalized, environment))
         require(info['toolchain'] == toolchain and info['settings'].get('CGO_ENABLED') == '0'
                 and info['settings'].get('GOOS') == target_os and info['settings'].get('GOARCH') == target_arch
                 and info['settings'].get('-trimpath') == 'true',
@@ -224,7 +271,7 @@ def build_release(root, output, version, source, run=command):
         if linked_modules is None:
             linked_modules = info['modules']
         require(info['modules'] == linked_modules, 'Platform builds have different linked module inventories')
-        notices = third_party_notices(root, goroot, linked_modules, module_locations)
+        notices = third_party_notices(normalized, goroot, linked_modules, module_locations)
         binary_data = binary.read_bytes()
         require(binary_target(binary_data) == (target_os, target_arch), 'Executable header differs from its requested target')
         data = archive_bytes(binary_data, license_text, notices, epoch)
@@ -234,6 +281,10 @@ def build_release(root, output, version, source, run=command):
         binary.unlink()
     staging.rmdir()
     check_source(root, source, run)
+    check_snapshot(normalized, source_files)
+    require(normalized.resolve().parent == output and normalized.name == '.source' and not normalized.is_symlink(),
+            'Normalized source cleanup escaped its owned output directory')
+    shutil.rmtree(normalized)
     sbom_name = 'bareplane_' + version + '.spdx.json'
     sbom_data = canonical(sbom(version, source, created, records, linked_modules, toolchain))
     (output / sbom_name).write_bytes(sbom_data)
