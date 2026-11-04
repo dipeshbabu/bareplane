@@ -12,5 +12,13 @@
   "helm_bootstrap": "3.21.4",
   "guest_reference": "Ubuntu 24.04 amd64",
   "additional_ci_guest": "Debian 12 amd64",
-  "proxmox_evidence": "operator release-candidate acceptance required; not supplied by hosted CI"
+  "proxmox_evidence": "operator release-candidate acceptance required; not supplied by hosted CI",
+  "cert_manager": "1.21.1",
+  "metrics_server": "0.9.0",
+  "prometheus": "3.14.0",
+  "kube_state_metrics": "2.20.0",
+  "external_dns": "0.22.0",
+  "sops": "3.13.3",
+  "external_secrets": "2.10.0",
+  "storage_inspector_image": "python:3.12.14-slim-bookworm"
 }

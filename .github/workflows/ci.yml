@@ -58,7 +58,7 @@ jobs:
           retention-days: 7
 
   join-topology:
-    name: "${{ matrix.mode == 'local-storage' && 'Core local storage VM' || matrix.mode == 'observability' && 'Core observability VM' || matrix.mode == 'vault' && 'Core Vault VM' || matrix.mode == 'sops' && 'Core SOPS VM' || matrix.mode == 'external-dns' && 'Core DNS VM' || matrix.mode == 'metrics-server' && 'Core Metrics Server VM' || matrix.mode == 'kubelet-tls' && 'Kubelet serving TLS VMs' || matrix.mode == 'cert-manager' && 'Core cert-manager VM' || matrix.mode == 'handoff' && 'GitOps handoff VM' || matrix.mode == 'argocd' && 'Argo installation VM' || matrix.mode == 'recovery' && 'Bootstrap recovery VM' || matrix.mode == 'apply' && 'Bootstrap apply VMs' || 'Multi-node join VMs' }}"
+    name: "${{ matrix.mode == 'core-profile' && 'Core profile VM' || matrix.mode == 'local-storage' && 'Core local storage VM' || matrix.mode == 'observability' && 'Core observability VM' || matrix.mode == 'vault' && 'Core Vault VM' || matrix.mode == 'sops' && 'Core SOPS VM' || matrix.mode == 'external-dns' && 'Core DNS VM' || matrix.mode == 'metrics-server' && 'Core Metrics Server VM' || matrix.mode == 'kubelet-tls' && 'Kubelet serving TLS VMs' || matrix.mode == 'cert-manager' && 'Core cert-manager VM' || matrix.mode == 'handoff' && 'GitOps handoff VM' || matrix.mode == 'argocd' && 'Argo installation VM' || matrix.mode == 'recovery' && 'Bootstrap recovery VM' || matrix.mode == 'apply' && 'Bootstrap apply VMs' || 'Multi-node join VMs' }}"
     # Keep nested-KVM acceptance on an explicit host release rather than a
     # rolling runner alias; guest OS and lifecycle assertions remain pinned.
     runs-on: ubuntu-24.04
@@ -66,7 +66,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: [phases, apply, recovery, argocd, handoff, cert-manager, kubelet-tls, metrics-server, external-dns, sops, vault, observability, local-storage]
+        mode: [phases, apply, recovery, argocd, handoff, cert-manager, kubelet-tls, metrics-server, external-dns, sops, vault, observability, local-storage, core-profile]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -103,6 +103,7 @@ jobs:
           BAREPLANE_TEST_OBSERVABILITY: "${{ matrix.mode == 'observability' && '1' || '0' }}"
           BAREPLANE_TEST_VAULT: "${{ matrix.mode == 'vault' && '1' || '0' }}"
           BAREPLANE_TEST_LOCAL_STORAGE: "${{ matrix.mode == 'local-storage' && '1' || '0' }}"
+          BAREPLANE_TEST_CORE_PROFILE: "${{ matrix.mode == 'core-profile' && '1' || '0' }}"
           BAREPLANE_TEST_GIT_REF: "${{ github.event.pull_request.head.sha || github.sha }}"
           BAREPLANE_TEST_GIT_REPO: "${{ github.event.pull_request.head.repo.clone_url || format('{0}/{1}.git', github.server_url, github.repository) }}"
         run: |

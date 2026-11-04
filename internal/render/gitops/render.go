@@ -155,7 +155,7 @@ initial handoff. Application deletion has no cascading resources finalizer.
 Use the guarded handoff workflow; do not directly apply this
 whole export. Rendering does not check repository reachability or cluster health.
 `, cfg.Metadata.Name, cfg.Spec.GitOps.RepoURL, cfg.Spec.GitOps.Revision, root, strings.Join(componentNames, ", "), ArgoVersion))
-	files["profiles/minimal/readme.md"] = []byte("# Minimal profile\n\nThe initial profile selects only components/argocd. It does not promise unimplemented observability, DNS automation, storage, AI or data services. Component additions and dependency resolution are separate tracked issues.\n")
+	files["profiles/minimal/readme.md"] = []byte("# Minimal profile\n\nThe safe default selects Argo CD. Explicit component selections add implemented core integrations with their required TLS, credential references, retention acknowledgements and local-volume inventory. The selected components are listed in the root readme. AI and data profiles remain unavailable until their complete implementation and acceptance gates pass.\n")
 	return files, nil
 }
 
