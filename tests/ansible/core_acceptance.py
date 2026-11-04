@@ -29,6 +29,7 @@ def root_source_patch(root, desired, ownership):
     nonce = ownership.get('nonce')
     if (root.get('kind') != 'Application' or metadata.get('name') != 'lab-root'
             or metadata.get('namespace') != 'argocd' or not metadata.get('uid')
+            or not metadata.get('resourceVersion') or metadata.get('deletionTimestamp')
             or metadata.get('annotations', {}).get('bareplane.io/cluster') != 'lab'
             or not isinstance(nonce, str) or not re.fullmatch(r'[0-9a-f]{32}', nonce)
             or metadata.get('annotations', {}).get('bareplane.io/handoff') != nonce
@@ -37,6 +38,7 @@ def root_source_patch(root, desired, ownership):
             or ownership.get('complete') is not True):
         raise RuntimeError('Core acceptance cannot replace unrelated root ownership')
     return [dict(op='test', path='/metadata/uid', value=metadata['uid']),
+            dict(op='test', path='/metadata/resourceVersion', value=metadata['resourceVersion']),
             dict(op='test', path='/spec/source', value=root['spec']['source']),
             dict(op='replace', path='/spec/source', value=desired)]
 
@@ -61,7 +63,7 @@ def wait_for(predicate, reason, timeout=300):
         time.sleep(2)
 
 
-def sync_to_source(api, name, source, revision, uid):
+def sync_to_source(api, name, source, revision, uid, previous_revision=None):
     operation = dict(sync=dict(revision=revision, prune=False))
     for attempt in range(3):
         current = api('get', 'application', name, '-n', 'argocd', '-o', 'json')
@@ -71,9 +73,14 @@ def sync_to_source(api, name, source, revision, uid):
         active_sync = active.get('sync', {})
         if converged(current, source, revision):
             return
-        if (active_sync.get('revision') == revision and not active_sync.get('prune', False)
-                and set(active_sync) <= {'revision', 'prune', 'syncOptions', 'syncStrategy'}):
+        safe_sync = (not active_sync.get('prune', False) and not active_sync.get('dryRun', False)
+                     and set(active_sync) <= {'revision', 'prune', 'syncOptions', 'syncStrategy', 'autoHealAttemptsCount', 'dryRun'})
+        if active_sync.get('revision') == revision and safe_sync:
             return  # A matching automated or ambiguously accepted operation is already progressing.
+        if previous_revision and active_sync.get('revision') == previous_revision and safe_sync:
+            wait_for(lambda: not api('get', 'application', name, '-n', 'argocd', '-o', 'json').get('operation'),
+                     'The previously approved root sync did not finish', timeout=300)
+            continue
         if active:
             raise RuntimeError('An unrelated core synchronization operation is active')
         try:
@@ -129,9 +136,28 @@ def run_core_acceptance(kubectl, repository, work, ssh, nodes, ownership):
     ssh('lab-control-1', 'test ! -e ' + directory + ' && test ! -L ' + directory
         + ' && install -d -m 0700 ' + directory)
     desired = core_source(source_repo, revision)
-    api('patch', 'application', 'lab-root', '-n', 'argocd', '--type=json', '-p',
-        json.dumps(root_source_patch(root, desired, ownership)), '-o', 'json')
-    sync_to_source(api, 'lab-root', desired, revision, root_uid)
+    try:
+        wait_for(lambda: not api('get', 'application', 'lab-root', '-n', 'argocd', '-o', 'json').get('operation'),
+                 'The handed-off root still has an active operation', timeout=300)
+        for attempt in range(3):
+            current = api('get', 'application', 'lab-root', '-n', 'argocd', '-o', 'json')
+            if current.get('operation'):
+                wait_for(lambda: not api('get', 'application', 'lab-root', '-n', 'argocd', '-o', 'json').get('operation'),
+                         'The handed-off root operation did not finish', timeout=300)
+                continue
+            try:
+                api('patch', 'application', 'lab-root', '-n', 'argocd', '--type=json', '-p',
+                    json.dumps(root_source_patch(current, desired, ownership)), '-o', 'json')
+                break
+            except RuntimeError:
+                if attempt == 2:
+                    raise
+                time.sleep(0.5)
+        sync_to_source(api, 'lab-root', desired, revision, root_uid, ownership['commit'])
+    except RuntimeError:
+        print('Core root activation diagnostics: ' + json.dumps(application_diagnostics(
+            'lab-root', api('get', 'application', 'lab-root', '-n', 'argocd', '-o', 'json'), desired, revision)), flush=True)
+        raise
 
     expected = {}
     for component in COMPONENTS:
