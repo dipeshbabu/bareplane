@@ -22,6 +22,7 @@ from sops_acceptance import run_sops_acceptance
 from observability_acceptance import run_observability_acceptance
 from vault_acceptance import run_vault_acceptance
 from storage_acceptance import run_storage_acceptance
+from argo_receipt import verify_installation_rerun
 
 
 IMAGE_URL = 'https://cloud-images.ubuntu.com/noble/20260826/noble-server-cloudimg-amd64.img'
@@ -310,8 +311,7 @@ def main():
                         raise RuntimeError('Minimal Argo did not record full owned readiness')
                     run(install)
                     current = json.loads((trust / 'argocd-ownership.json').read_text())
-                    if current != original:
-                        raise RuntimeError('Argo rerun changed owned resource identities or content')
+                    verify_installation_rerun(original, current)
                     if json.loads((trust / 'gitops.json').read_text())['stage'] != 'argocd-ready':
                         raise RuntimeError('CLI did not record Argo readiness')
                     if api('get', 'applications,applicationsets', '-n', 'argocd', '-o', 'json')['items']:
