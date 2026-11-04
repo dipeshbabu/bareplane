@@ -206,12 +206,13 @@ class ReleaseArtifactTests(unittest.TestCase):
         path.write_bytes(original)
 
     def test_ambient_execution_overrides_and_credentials_are_not_forwarded(self):
-        environment = release.build_environment(dict(PATH='/bin', HOME='/operator', GOCACHE='/cache',
+        environment = release.build_environment(dict(PATH='/bin', HOME='/operator', GOCACHE='/cache', LOCALAPPDATA='/local-data',
             GOFLAGS='-overlay=unreviewed.json', GOTOOLCHAIN='auto', GOOS='hostile', GOWORK='/unreviewed',
             BAREPLANE_PROXMOX_TOKEN_SECRET='SECRET', GITHUB_TOKEN='SECRET', TF_CLI_ARGS='-destroy', PYTHONPATH='/unreviewed'))
         self.assertEqual(environment['GOFLAGS'], '')
         self.assertEqual(environment['GOWORK'], 'off')
         self.assertEqual(environment['GOTOOLCHAIN'], 'local')
+        self.assertEqual(environment['LOCALAPPDATA'], '/local-data')
         self.assertNotIn('GOOS', environment)
         self.assertNotIn('SECRET', str(environment))
         self.assertNotIn('PYTHONPATH', environment)

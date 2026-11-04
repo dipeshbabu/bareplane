@@ -11,7 +11,7 @@ def verify(needs):
     if not isinstance(needs, dict) or set(needs) != REQUIRED:
         raise ValueError('Required acceptance dependency set is incomplete or changed')
     if any(not isinstance(value, dict) or value.get('result') != 'success' for value in needs.values()):
-        raise ValueError('Every required quality and VM dependency must succeed; skips are not acceptance')
+        raise ValueError('Every required CI dependency must succeed; skips are not acceptance')
 
 
 if __name__ == '__main__':

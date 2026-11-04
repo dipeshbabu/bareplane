@@ -59,7 +59,8 @@ def command(args, root, environment=None):
 def build_environment(base=None):
     base = os.environ if base is None else base
     allowed = {'PATH', 'SystemRoot', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'TMPDIR', 'HOME',
-               'USER', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'GOCACHE', 'GOMODCACHE', 'GOPATH'}
+               'USER', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'LOCALAPPDATA', 'APPDATA',
+               'GOCACHE', 'GOMODCACHE', 'GOPATH'}
     environment = {key: value for key, value in base.items() if key in allowed}
     environment.update(CGO_ENABLED='0', GOWORK='off', GOENV='off', GOFLAGS='', GOTOOLCHAIN='local',
                        GOAMD64='v1', GOARM64='v8.0',
