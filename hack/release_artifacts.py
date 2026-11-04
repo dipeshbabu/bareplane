@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import tarfile
 from urllib.parse import quote
+import zipfile
 
 
 MODULE = 'github.com/dipeshbabu/bareplane'
@@ -202,7 +203,22 @@ def binary_target(data):
     raise ReleaseError('Release executable is not a supported ELF or Mach-O binary')
 
 
-def sbom(version, source, created, records, modules, toolchain):
+def installer_zip(root, version, source):
+    buffer = io.BytesIO()
+    files = {'__main__.py': ('from install_release import cli\ncli(' + repr(version) + ', ' + repr(source) + ')\n').encode(),
+             'install_release.py': (root / 'hack/install_release.py').read_bytes(),
+             'release_artifacts.py': (root / 'hack/release_artifacts.py').read_bytes(),
+             'LICENSE': (root / 'LICENSE').read_bytes()}
+    with zipfile.ZipFile(buffer, 'w', compression=zipfile.ZIP_STORED) as archive:
+        for name, data in sorted(files.items()):
+            entry = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            entry.create_system = 3
+            entry.external_attr = 0o100644 << 16
+            archive.writestr(entry, data)
+    return buffer.getvalue()
+
+
+def sbom(version, source, created, records, modules, toolchain, installer=None):
     packages, relationships = [], []
     dependencies = [('SPDXRef-GoStandardLibrary', 'Go standard library', toolchain.removeprefix('go'), None)]
     for module in modules:
@@ -225,6 +241,14 @@ def sbom(version, source, created, records, modules, toolchain):
         relationships.append(dict(spdxElementId='SPDXRef-DOCUMENT', relationshipType='DESCRIBES', relatedSpdxElement=identifier))
         for dependency, _, _, _ in dependencies:
             relationships.append(dict(spdxElementId=identifier, relationshipType='DEPENDS_ON', relatedSpdxElement=dependency))
+    if installer:
+        identifier = 'SPDXRef-Bareplane-Installer'
+        packages.append(dict(SPDXID=identifier, name='bareplane-installer', versionInfo=version,
+            packageFileName=installer['filename'], filesAnalyzed=False,
+            downloadLocation='https://github.com/' + REPOSITORY + '/releases/download/v' + version + '/' + installer['filename'],
+            licenseDeclared='MIT', licenseConcluded='NOASSERTION', copyrightText='NOASSERTION',
+            checksums=[dict(algorithm='SHA256', checksumValue=installer['sha256'])]))
+        relationships.append(dict(spdxElementId='SPDXRef-DOCUMENT', relationshipType='DESCRIBES', relatedSpdxElement=identifier))
     return dict(spdxVersion='SPDX-2.3', dataLicense='CC0-1.0', SPDXID='SPDXRef-DOCUMENT', name='bareplane-' + version,
         documentNamespace='https://github.com/' + REPOSITORY + '/sbom/' + source + '/' + version,
         creationInfo=dict(creators=['Tool: bareplane-release-builder'], created=created), packages=packages, relationships=relationships)
@@ -282,14 +306,19 @@ def build_release(root, output, version, source, run=command):
     staging.rmdir()
     check_source(root, source, run)
     check_snapshot(normalized, source_files)
+    installer_name = 'bareplane_' + version + '_installer.pyz'
+    installer_data = installer_zip(normalized, version, source)
+    installer = dict(filename=installer_name, size=len(installer_data), sha256=digest(installer_data))
+    (output / installer_name).write_bytes(installer_data)
     require(normalized.resolve().parent == output and normalized.name == '.source' and not normalized.is_symlink(),
             'Normalized source cleanup escaped its owned output directory')
     shutil.rmtree(normalized)
     sbom_name = 'bareplane_' + version + '.spdx.json'
-    sbom_data = canonical(sbom(version, source, created, records, linked_modules, toolchain))
+    sbom_data = canonical(sbom(version, source, created, records, linked_modules, toolchain, installer))
     (output / sbom_name).write_bytes(sbom_data)
-    manifest = dict(schemaVersion=1, name='bareplane', version=version, repository=REPOSITORY, sourceCommit=source,
+    manifest = dict(schemaVersion=2, name='bareplane', version=version, repository=REPOSITORY, sourceCommit=source,
                     sourceDate=created, goVersion=toolchain, artifacts=records,
+                    installer=installer,
                     sbom=dict(filename=sbom_name, size=len(sbom_data), sha256=digest(sbom_data)))
     manifest_name = 'bareplane_' + version + '_manifest.json'
     (output / manifest_name).write_bytes(canonical(manifest))
@@ -302,7 +331,7 @@ def build_release(root, output, version, source, run=command):
 def verify_release(directory):
     try:
         return _verify_release(directory)
-    except (KeyError, TypeError, AttributeError, IndexError, ValueError, tarfile.TarError) as error:
+    except (KeyError, TypeError, AttributeError, IndexError, ValueError, tarfile.TarError, zipfile.BadZipFile) as error:
         raise ReleaseError('Release manifest or archive has a malformed shape') from error
 
 
@@ -313,8 +342,8 @@ def _verify_release(directory):
     require(len(manifests) == 1, 'Exactly one release manifest is required')
     require(not manifests[0].is_symlink() and manifests[0].stat().st_size <= MAX_TEXT, 'Release manifest is redirected or oversized')
     manifest = json.loads(manifests[0].read_bytes())
-    require(set(manifest) == {'schemaVersion', 'name', 'version', 'repository', 'sourceCommit', 'sourceDate', 'goVersion', 'artifacts', 'sbom'}
-            and type(manifest['schemaVersion']) is int and manifest['schemaVersion'] == 1
+    require(set(manifest) == {'schemaVersion', 'name', 'version', 'repository', 'sourceCommit', 'sourceDate', 'goVersion', 'artifacts', 'sbom', 'installer'}
+            and type(manifest['schemaVersion']) is int and manifest['schemaVersion'] == 2
             and manifest['name'] == 'bareplane' and manifest['repository'] == REPOSITORY
             and VERSION.fullmatch(manifest['version']) and SHA.fullmatch(manifest['sourceCommit'])
             and released_go(manifest['goVersion']), 'Release identity is invalid')
@@ -327,11 +356,11 @@ def _verify_release(directory):
     require(len(artifacts) == len(TARGETS) and {(item['os'], item['arch']) for item in artifacts} == set(TARGETS),
             'Release must contain every supported platform exactly once')
     expected = {manifests[0].name, 'SHA256SUMS'}
-    for item in [*artifacts, manifest['sbom']]:
+    for item in [*artifacts, manifest['sbom'], manifest['installer']]:
         require(set(item) == ({'os', 'arch', 'filename', 'size', 'sha256'} if 'os' in item else {'filename', 'size', 'sha256'}),
                 'Release artifact fields are invalid')
         name = ('bareplane_' + version + '_' + item['os'] + '_' + item['arch'] + '.tar.gz' if 'os' in item
-                else 'bareplane_' + version + '.spdx.json')
+                else 'bareplane_' + version + ('_installer.pyz' if item is manifest['installer'] else '.spdx.json'))
         require(item['filename'] == name and DIGEST.fullmatch(item['sha256']) and type(item['size']) is int and item['size'] > 0,
                 'Release artifact identity is invalid')
         path = directory / name
@@ -355,6 +384,16 @@ def _verify_release(directory):
                         require(binary_target(data) == (item['os'], item['arch']), 'Archive executable does not match its platform')
                     count += 1
                 require(count == 3, 'Release archive is incomplete')
+        if item is manifest['installer']:
+            with zipfile.ZipFile(path) as archive:
+                entries = archive.infolist()
+                require([entry.filename for entry in entries] == ['LICENSE', '__main__.py', 'install_release.py', 'release_artifacts.py']
+                        and all(entry.compress_type == zipfile.ZIP_STORED and 0 < entry.file_size <= MAX_TEXT
+                                and entry.external_attr >> 16 == 0o100644 and entry.date_time == (1980, 1, 1, 0, 0, 0)
+                                for entry in entries), 'Installer archive contains unexpected files, links or sizes')
+                expected_entry = ('from install_release import cli\ncli(' + repr(version) + ', ' + repr(manifest['sourceCommit']) + ')\n').encode()
+                require(archive.read('__main__.py') == expected_entry and archive.testzip() is None,
+                        'Installer entry point differs from its reviewed source/version')
     require({path.name for path in directory.iterdir()} == expected, 'Release directory contains unexpected or partial output')
     checksums = ''.join(digest(path.read_bytes()) + '  ' + path.name + '\n'
                         for path in sorted(directory.iterdir()) if path.name != 'SHA256SUMS')
@@ -376,6 +415,10 @@ def _verify_release(directory):
                 'Release SBOM does not describe the actual artifact set')
     require(packages.get('SPDXRef-GoStandardLibrary', {}).get('versionInfo') == manifest['goVersion'].removeprefix('go'),
             'Release SBOM toolchain version differs from the artifacts')
+    package = packages.get('SPDXRef-Bareplane-Installer', {})
+    require(package.get('packageFileName') == manifest['installer']['filename'] and package.get('versionInfo') == version
+            and package.get('checksums') == [dict(algorithm='SHA256', checksumValue=manifest['installer']['sha256'])],
+            'Release SBOM does not describe the actual installer')
     return manifest
 
 

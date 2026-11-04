@@ -7,7 +7,10 @@ import json
 from pathlib import Path
 import tarfile
 import tempfile
+import subprocess
+import sys
 import unittest
+import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -37,6 +40,9 @@ class FakeBuild:
         self.root.mkdir()
         (self.root / 'LICENSE').write_text('Bareplane MIT license\n')
         (self.root / 'go.mod').write_text('module ' + release.MODULE + '\n\ngo 1.23\n')
+        (self.root / 'hack').mkdir()
+        for name in ['install_release.py', 'release_artifacts.py']:
+            (self.root / 'hack' / name).write_bytes((ROOT / 'hack' / name).read_bytes())
         self.goroot = directory / 'go'
         self.goroot.mkdir()
         (self.goroot / 'LICENSE').write_text('Go BSD license\n')
@@ -58,7 +64,7 @@ class FakeBuild:
         if args[:2] == ['git', 'archive']:
             buffer = io.BytesIO()
             with tarfile.open(fileobj=buffer, mode='w') as archive:
-                for name in ['LICENSE', 'go.mod']:
+                for name in ['LICENSE', 'go.mod', 'hack/install_release.py', 'hack/release_artifacts.py']:
                     data = (self.root / name).read_text().replace('\r\n', '\n').encode()
                     member = tarfile.TarInfo(name)
                     member.size, member.mode, member.mtime = len(data), 0o644, EPOCH
@@ -113,7 +119,7 @@ class ReleaseArtifactTests(unittest.TestCase):
             data = (self.output / item['filename']).read_bytes()
             item.update(size=len(data), sha256=release.digest(data))
         inventory = release.canonical(release.sbom(VERSION, SOURCE, CREATED, manifest['artifacts'],
-            [dict(path='gopkg.in/yaml.v3', version='v3.0.1')], manifest['goVersion']))
+            [dict(path='gopkg.in/yaml.v3', version='v3.0.1')], manifest['goVersion'], manifest['installer']))
         (self.output / manifest['sbom']['filename']).write_bytes(inventory)
         manifest['sbom'].update(size=len(inventory), sha256=release.digest(inventory))
         (self.output / ('bareplane_' + VERSION + '_manifest.json')).write_bytes(release.canonical(manifest))
@@ -239,7 +245,7 @@ class ReleaseArtifactTests(unittest.TestCase):
         (self.build.root / 'LICENSE').write_bytes(b'Bareplane MIT license\r\n')
         destination = self.directory / 'snapshot'
         files = release.snapshot_source(self.build.root, SOURCE, destination, self.build.run)
-        self.assertEqual(set(files), {'LICENSE', 'go.mod'})
+        self.assertEqual(set(files), {'LICENSE', 'go.mod', 'hack/install_release.py', 'hack/release_artifacts.py'})
         self.assertEqual((destination / 'LICENSE').read_bytes(), b'Bareplane MIT license\n')
         (destination / 'go.mod').write_text('changed')
         with self.assertRaisesRegex(release.ReleaseError, 'changed'):
@@ -258,6 +264,20 @@ class ReleaseArtifactTests(unittest.TestCase):
                 return buffer.getvalue()
             with self.subTest(name=name), self.assertRaises(release.ReleaseError):
                 release.snapshot_source(self.build.root, SOURCE, self.directory / ('bad-source-' + str(index)), run)
+
+    def test_standalone_installer_runs_without_checkout_and_rejects_extra_code(self):
+        manifest = self.create()
+        path = self.output / manifest['installer']['filename']
+        result = subprocess.run([sys.executable, '-I', str(path), '--help'], cwd=self.directory,
+                                capture_output=True, timeout=30, check=True)
+        self.assertIn(b'--manifest-sha256', result.stdout)
+        with zipfile.ZipFile(path, 'a') as archive:
+            archive.writestr('unreviewed.py', 'raise RuntimeError()')
+        data = path.read_bytes()
+        manifest['installer'].update(size=len(data), sha256=release.digest(data))
+        self.rewrite_metadata(manifest)
+        with self.assertRaisesRegex(release.ReleaseError, 'Installer archive'):
+            release.verify_release(self.output)
 
 
 if __name__ == '__main__':

@@ -44,7 +44,7 @@ def download_release(version, manifest_sha256, directory, fetch=read_asset):
     # Derive the closed filename inventory locally, never from untrusted URLs.
     from release_artifacts import TARGETS
     names = ['bareplane_' + version + '_' + target_os + '_' + arch + '.tar.gz' for target_os, arch in TARGETS]
-    names += ['bareplane_' + version + '.spdx.json', 'SHA256SUMS']
+    names += ['bareplane_' + version + '.spdx.json', 'bareplane_' + version + '_installer.pyz', 'SHA256SUMS']
     (directory / name).write_bytes(data)
     for filename in names:
         (directory / filename).write_bytes(fetch(base + filename, MAX_ARCHIVE if filename.endswith('.tar.gz') else MAX_TEXT))
@@ -124,22 +124,28 @@ def install(directory, prefix, upgrade=False, target=None):
             shutil.rmtree(stage)
 
 
-def main():
+def main(expected_version=None, expected_source=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--version', required=True)
     parser.add_argument('--manifest-sha256', required=True, help='Trusted SHA-256 from an independently verified release manifest')
     parser.add_argument('--prefix', type=Path, default=Path.home() / '.local')
     parser.add_argument('--upgrade', action='store_true')
     args = parser.parse_args()
+    require(expected_version is None or args.version == expected_version, 'Use the installer published for this exact version')
     native_target()
     with tempfile.TemporaryDirectory(prefix='bareplane-install-download-') as temporary:
         directory = Path(temporary)
-        download_release(args.version, args.manifest_sha256, directory)
+        manifest = download_release(args.version, args.manifest_sha256, directory)
+        require(expected_source is None or manifest['sourceCommit'] == expected_source, 'Installer and binary source commits differ')
         print(json.dumps(install(directory, args.prefix, args.upgrade), sort_keys=True))
 
 
-if __name__ == '__main__':
+def cli(expected_version=None, expected_source=None):
     try:
-        main()
+        main(expected_version, expected_source)
     except (ReleaseError, OSError, ValueError, KeyError, TypeError, tarfile.TarError) as error:
         raise SystemExit(str(error))
+
+
+if __name__ == '__main__':
+    cli()

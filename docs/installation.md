@@ -22,20 +22,21 @@ commands are supported; bootstrap execution requires the Linux/WSL controller.
 
 ## Install a published version
 
-Installing a published binary requires Python 3.10+ and this reviewed repository's
-`hack/install_release.py` and `hack/release_artifacts.py`; Go is not required.
-Choose an explicit released version. Obtain its manifest and verify its provenance
+Installing a published binary requires Python 3.10+; cloning and Go are not required.
+Choose an explicit released version. Download its `bareplane_VERSION_installer.pyz`
+and manifest from the exact GitHub release, and verify their provenance
 as described in [release publication](release-publication.md), then record that
 verified manifest's SHA-256 independently of the download being installed.
 
 ```sh
-python3 hack/install_release.py \
+python3 "bareplane_${RELEASE_VERSION}_installer.pyz" \
   --version "$RELEASE_VERSION" \
   --manifest-sha256 "$VERIFIED_MANIFEST_SHA256" \
   --prefix "$HOME/.local"
 ```
 
-The installer fetches only exact-version HTTPS release assets, verifies the
+The standalone installer is bound to its own release version and source commit.
+It fetches only exact-version HTTPS release assets, verifies the
 trusted manifest digest and the complete archive/SBOM/checksum set, and selects
 the native platform. Downloads are bounded and archives cannot introduce links,
 paths or extra files. The complete release is checked before the prefix changes.

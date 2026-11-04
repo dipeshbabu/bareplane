@@ -37,7 +37,7 @@ class InstallTests(unittest.TestCase):
         digest = release.digest((self.output / ('bareplane_' + VERSION + '_manifest.json')).read_bytes())
         result = installer.download_release(VERSION, digest, stage, fetch)
         self.assertEqual(result, self.manifest)
-        self.assertEqual(len(calls), 7)
+        self.assertEqual(len(calls), 8)
         self.assertTrue(all(url.startswith('https://github.com/' + release.REPOSITORY + '/releases/download/v' + VERSION + '/') for url in calls))
 
     def test_changed_manifest_or_unsafe_version_stops_before_archive_download(self):

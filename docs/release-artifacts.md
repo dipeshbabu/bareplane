@@ -21,7 +21,8 @@ output that cannot pass verification.
 ## Contents
 
 The complete set contains four executable archives for Linux/macOS on amd64/arm64,
-an SPDX 2.3 SBOM, a versioned manifest, and `SHA256SUMS`. Each archive contains only:
+an SPDX 2.3 SBOM, a standalone Python installer, a versioned manifest, and
+`SHA256SUMS`. Each executable archive contains only:
 
 - `bareplane`, with executable mode `0755`;
 - the project `LICENSE`;
@@ -29,7 +30,10 @@ an SPDX 2.3 SBOM, a versioned manifest, and `SHA256SUMS`. Each archive contains 
   vendored payload licenses/notices.
 
 The manifest binds version, source commit/date, actual Go toolchain, platform,
-archive size/digest and SBOM size/digest. The SBOM is generated from the modules
+archive size/digest, installer size/digest and SBOM size/digest. The installer is
+a deterministic stored ZIP application with a version/source-bound entry point,
+the two reviewed Python modules and the project license. It requires Python
+3.10+, with no checkout or Go compiler. The SBOM is generated from the modules
 actually linked into the binaries, not every test-only module in `go.sum`.
 License conclusions that have not been separately audited remain `NOASSERTION`;
 the full notice text is distributed rather than guessed.

@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 
@@ -30,6 +31,9 @@ def smoke(directory, brew=False):
         root = Path(temporary).resolve()
         require(root.parent == Path(tempfile.gettempdir()).resolve(), 'Install smoke workspace escaped its temporary root')
         installed = install(directory, root / 'prefix')
+        # Run the shipped standalone application outside any repository checkout.
+        require('--manifest-sha256' in command([sys.executable, directory / manifest['installer']['filename'], '--help'], cwd=root),
+                'Standalone installer could not run without the source checkout')
         binary = installed['executable']
         # The installed binary must work without the Go compiler on PATH.
         environment = dict(os.environ, PATH='/usr/bin:/bin:/usr/sbin:/sbin')

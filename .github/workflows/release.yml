@@ -90,7 +90,9 @@ jobs:
       - name: Bind the validated SPDX inventory to every platform archive
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
         with:
-          subject-path: ${{ runner.temp }}/candidate/*.tar.gz
+          subject-path: |
+            ${{ runner.temp }}/candidate/*.tar.gz
+            ${{ runner.temp }}/candidate/*_installer.pyz
           sbom-path: ${{ runner.temp }}/candidate/bareplane_${{ needs.verify.outputs.version }}.spdx.json
       - name: Retain the verified candidate without publishing a release
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

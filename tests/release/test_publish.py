@@ -70,12 +70,12 @@ class PublisherTests(unittest.TestCase):
         self.assertTrue(self.api.writes[1][2]['draft'])
         self.assertFalse(self.api.writes[-1][2]['draft'])
         verifications = [call for call in self.calls if call[:2] == ['attestation', 'verify']]
-        self.assertEqual(len(verifications), len(list(self.output.iterdir())) + 4)
+        self.assertEqual(len(verifications), len(list(self.output.iterdir())) + 5)
         for call in verifications:
             self.assertIn(SOURCE, call)
             self.assertIn('--deny-self-hosted-runners', call)
             self.assertIn(publisher.REPOSITORY + '/' + publisher.WORKFLOW, call)
-        self.assertEqual(sum('https://spdx.dev/Document' in call for call in verifications), 4)
+        self.assertEqual(sum('https://spdx.dev/Document' in call for call in verifications), 5)
         upload = [call for call in self.calls if call[:2] == ['release', 'upload']][0]
         self.assertNotIn('--clobber', upload)
         self.assertEqual(len(upload[3:-2]), len(list(self.output.iterdir())))
