@@ -41,6 +41,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stdout, usage)
 		return 0
 	}
+	if help, ok := commandHelp(args); ok {
+		fmt.Fprint(stdout, help)
+		return 0
+	}
 
 	switch strings.ToLower(args[0]) {
 	case "help", "-h", "--help":
