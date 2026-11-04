@@ -49,7 +49,9 @@ inputs. Reproducibility is checked with the same selected toolchain.
 CI pins the release compiler in `.release-go-version`; the normal Go quality gate
 continues to check the module's minimum toolchain. The required **Release artifacts**
 job builds all four platforms twice, compares the complete outputs, verifies the
-manifest/SBOM/archive boundaries, and runs the native Linux CLI's version, help,
+manifest/SBOM/archive boundaries, validates SPDX against the checksum-pinned
+[official 2.3.1 schema](https://github.com/spdx/spdx-spec/blob/v2.3.1/schemas/spdx-schema.json),
+and runs the native Linux CLI's version, help,
 initialization and validation commands. CI preview artifacts are retained for
 seven days and are not certified releases.
 
