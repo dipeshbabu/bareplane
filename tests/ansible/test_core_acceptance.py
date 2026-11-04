@@ -91,6 +91,12 @@ class CoreAcceptanceTests(unittest.TestCase):
             self.assertEqual(args[0], 'get')
             return copy.deepcopy(application)
         sync_to_source(api, 'lab-root', self.source, 'a' * 40, 'owned')
+        application['operation']['sync']['source'] = copy.deepcopy(self.source)
+        sync_to_source(api, 'lab-root', self.source, 'a' * 40, 'owned')
+        application['operation']['sync']['source']['path'] = 'unreviewed'
+        with self.assertRaises(RuntimeError):
+            sync_to_source(api, 'lab-root', self.source, 'a' * 40, 'owned')
+        application['operation']['sync']['source'] = copy.deepcopy(self.source)
         application['operation']['sync']['manifests'] = ['unreviewed']
         with self.assertRaises(RuntimeError):
             sync_to_source(api, 'lab-root', self.source, 'a' * 40, 'owned')

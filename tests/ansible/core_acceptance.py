@@ -63,7 +63,7 @@ def wait_for(predicate, reason, timeout=300):
         time.sleep(2)
 
 
-def sync_to_source(api, name, source, revision, uid, previous_revision=None):
+def sync_to_source(api, name, source, revision, uid, previous_revision=None, previous_source=None):
     operation = dict(sync=dict(revision=revision, prune=False))
     for attempt in range(3):
         current = api('get', 'application', name, '-n', 'argocd', '-o', 'json')
@@ -74,10 +74,15 @@ def sync_to_source(api, name, source, revision, uid, previous_revision=None):
         if converged(current, source, revision):
             return
         safe_sync = (not active_sync.get('prune', False) and not active_sync.get('dryRun', False)
-                     and set(active_sync) <= {'revision', 'prune', 'syncOptions', 'syncStrategy', 'autoHealAttemptsCount', 'dryRun'})
-        if active_sync.get('revision') == revision and safe_sync:
+                     and not active_sync.get('sources') and not active_sync.get('revisions')
+                     and set(active_sync) <= {'revision', 'prune', 'syncOptions', 'syncStrategy', 'selfHealAttemptsCount',
+                                              'dryRun', 'source', 'sources', 'revisions'})
+        # Argo's automatic sync records its exact ApplicationSource in the
+        # operation. Accept that snapshot only when it is the reviewed source.
+        if active_sync.get('revision') == revision and safe_sync and active_sync.get('source', source) == source:
             return  # A matching automated or ambiguously accepted operation is already progressing.
-        if previous_revision and active_sync.get('revision') == previous_revision and safe_sync:
+        if (previous_revision and active_sync.get('revision') == previous_revision and safe_sync
+                and active_sync.get('source', previous_source) == previous_source):
             wait_for(lambda: not api('get', 'application', name, '-n', 'argocd', '-o', 'json').get('operation'),
                      'The previously approved root sync did not finish', timeout=300)
             continue
@@ -110,6 +115,8 @@ def application_diagnostics(name, current, source, revision):
                 comparedSourceMatches=compared == source,
                 comparedSourceDifferentFields=sorted(key for key in set(compared) | set(source) if compared.get(key) != source.get(key)),
                 operationActive=bool(current.get('operation')), operationPhase=status.get('operationState', {}).get('phase'),
+                operationRevisionMatches=current.get('operation', {}).get('sync', {}).get('revision') == revision,
+                operationSourceMatches=current.get('operation', {}).get('sync', {}).get('source', source) == source,
                 conditionCount=len(status.get('conditions', [])),
                 errorCategories=[name for name, pattern in patterns.items() if pattern in messages.lower()],
                 resources=[dict(kind=item.get('kind'), name=item.get('name'), sync=item.get('status'),
@@ -153,7 +160,9 @@ def run_core_acceptance(kubectl, repository, work, ssh, nodes, ownership):
                 if attempt == 2:
                     raise
                 time.sleep(0.5)
-        sync_to_source(api, 'lab-root', desired, revision, root_uid, ownership['commit'])
+        else:
+            raise RuntimeError('The handed-off root could not be changed without an operation conflict')
+        sync_to_source(api, 'lab-root', desired, revision, root_uid, ownership['commit'], root['spec']['source'])
     except RuntimeError:
         print('Core root activation diagnostics: ' + json.dumps(application_diagnostics(
             'lab-root', api('get', 'application', 'lab-root', '-n', 'argocd', '-o', 'json'), desired, revision)), flush=True)
