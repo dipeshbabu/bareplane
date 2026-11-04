@@ -1,119 +1,144 @@
 # Bareplane
 
-Build and operate a private Kubernetes platform on hardware you own — without ever mutating infrastructure you did not explicitly approve.
+Provision Kubernetes on your own Proxmox infrastructure and hand platform configuration over to GitOps.
 
-## The guarantee
+[![CI](https://github.com/dipeshbabu/bareplane/actions/workflows/ci.yml/badge.svg)](https://github.com/dipeshbabu/bareplane/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Bareplane does not change anything on trust. Every stage that can mutate infrastructure is gated, and every gate fails closed:
+Bareplane brings infrastructure planning, Kubernetes bootstrap, and Argo CD handoff to your terminal. One `bareplane.yaml` describes your cluster. Terraform manages the VMs, embedded Ansible bootstraps Kubernetes with kube-vip and Cilium, and your Git repository owns platform configuration after handoff.
 
-- **Apply accepts only an attested plan.** `terraform plan` writes a saved plan alongside a SHA-256 attestation. `terraform apply` verifies that attestation immediately before mutation, accepts nothing else, and invalidates it before the first change — so a partial or failed apply can never be silently replayed.
-- **Approval is a name, not a flag.** Mutating commands require `--approve <cluster-name>` matching the cluster in your configuration. There is no `--yes` and no auto-approve.
-- **It refuses what it does not own.** Unexpected Proxmox guests, unmanaged generated Terraform, and unmanaged Argo resources are errors. Bareplane will not adopt them, and it will not compete with a reconciler that already owns them.
-- **Host identities are trusted explicitly.** `bootstrap trust` records only SSH host keys you reviewed out of band against the machine consoles. Nothing pipes automatic approval into host trust.
-- **`status` reports records, not guesses.** It reads local lifecycle state and says so. It never claims a live cluster audit it did not perform, and it never asserts that an attested plan is still current — `apply` remains the authoritative verifier.
+**Early development:** Proxmox is the only implemented provider. Run infrastructure and bootstrap workflows from a supported Linux or WSL controller. Read the [compatibility record](docs/compatibility.json) and [known limitations](docs/known-limitations.md) before using a real environment.
 
-When a command cannot prove it is safe to proceed, it stops and names what is missing. Read [known limitations](docs/known-limitations.md) before you decide whether that trade is the one you want.
+## Installation
 
-## How it works
-
-One user-owned configuration file drives the whole lifecycle, with a clear ownership boundary at each stage:
-
-```text
-bareplane.yaml
-      |
-      v
-Bareplane CLI
-      |
-      +--> provider layer     --> infrastructure      (Bareplane owns)
-      +--> deterministic Terraform
-      +--> bootstrap layer    --> Kubernetes          (Bareplane owns)
-      +--> GitOps renderer    --> desired state       (you own, via Argo)
-```
-
-Bareplane keeps ownership of infrastructure, Kubernetes bootstrap, kube-vip, and Cilium. It installs only the minimal Argo CD resources needed to hand over. After handoff, your Git repository is authoritative and Bareplane stops competing for that state. See [docs/architecture.md](docs/architecture.md) and the [user-owned GitOps contract](docs/gitops.md).
-
-Provider-specific behavior stays behind provider boundaries, so additional environments can be added without rewriting the CLI or the configuration model.
-
-## Scope
-
-Bareplane is in early development. The v0.1 path is deliberately narrow, and the [component registry](docs/platform-graph.md) gates everything else as unavailable rather than shipping it half-built.
-
-**Implemented and covered by the [acceptance baseline](docs/acceptance.md):** Proxmox infrastructure, Linux/kubeadm/Cilium bootstrap, private cluster access and health, minimal Argo CD, verified GitOps handoff, and the opt-in cert-manager, kubelet serving TLS, metrics-server, external-dns, and SOPS secret delivery components.
-
-**Not implemented.** GPU and AI capabilities, stateful data services, and persistent storage are present in the registry as dependency-ordered entries with an `unavailable` status. They are a plan, not a feature list. Proxmox is the only provider; re-running installation is not an upgrade or node-replacement workflow; initial GitOps supports anonymous HTTPS repositories only. The [full list](docs/known-limitations.md) is maintained deliberately and is not a disclaimer.
-
-## Lifecycle
-
-Build the binary with `make build`, or substitute `go run ./cmd/bareplane` for `bareplane` below.
-
-**Set up and inspect** — nothing here mutates anything.
+Build from source with Go 1.23 or newer:
 
 ```bash
-bareplane init                  # starter config; never overwrites existing files
-bareplane validate              # strict configuration contract
-bareplane doctor                # local tooling, credentials, Proxmox reachability
-bareplane status                # local lifecycle state and the safest next command
-bareplane plan                  # ownership-aware desired-vs-observed, no Terraform
+git clone https://github.com/dipeshbabu/bareplane.git
+cd bareplane
+go build -o bin/bareplane ./cmd/bareplane
+./bin/bareplane version
 ```
 
-**Provision infrastructure** — the attestation gate.
+Add the repository's `bin` directory to your `PATH` to use `bareplane` from your project directory. You can also run `go run ./cmd/bareplane` from this checkout.
+
+Packaged releases and package-manager installation are planned. The commands below use a locally built binary. Infrastructure execution also requires Terraform and Proxmox credentials; bootstrap requires SSH, Ansible, and the supported controller tools. See [doctor](docs/doctor.md), [bootstrap doctor](docs/bootstrap.md), and the compatibility record for requirements.
+
+## Create a project
 
 ```bash
-bareplane render                          # deterministic Terraform in .bareplane/terraform
-bareplane terraform plan                  # provider-backed saved plan + SHA-256 attestation
-bareplane terraform apply --approve <cluster-name>
+mkdir my-cluster
+cd my-cluster
+bareplane init
+bareplane validate
+bareplane status
 ```
 
-**Bootstrap Kubernetes** — the host trust gate.
+`init` writes a valid starter configuration and refuses to overwrite existing files. Edit `bareplane.yaml` with your Proxmox endpoint, placement targets, image, resources, and SSH settings before provisioning. The starter is a configuration example; it does not create infrastructure.
+
+Start with the [configuration guide](docs/configuration.md) and [example configuration](examples/bareplane.yaml). For the full Kubernetes-to-GitOps path, adapt the [acceptance example](examples/acceptance.yaml), including explicit machine addresses, a free API VIP, Kubernetes settings, and your public GitOps repository. Keep API credentials in the documented [environment variables](docs/proxmox.md).
+
+## Provision infrastructure
+
+Inspect provider readiness and compare the desired machines with existing Proxmox guests:
 
 ```bash
-bareplane bootstrap render                # deterministic Ansible inventory
-bareplane bootstrap doctor                # local readiness
-bareplane bootstrap check                 # remote reachability
-bareplane bootstrap trust                 # record reviewed SSH host identities
-bareplane bootstrap preflight             # authenticated fresh-host verification
-bareplane bootstrap apply --approve <cluster-name>
+bareplane doctor
+bareplane plan
 ```
 
-Recovery and diagnostics: `bootstrap diagnose`, `bootstrap recover-kubeconfig`, `bootstrap kubelet-tls`, and `bootstrap reset --approve <cluster-name>`, which is limited to an owned bootstrap-only cluster and refuses application- or storage-bearing state. See [bootstrap recovery](docs/bootstrap-recovery.md).
-
-**Hand over to GitOps** — the ownership transfer gate.
+Render Terraform, review the saved provider-backed plan, and apply it with your exact configured cluster name:
 
 ```bash
-bareplane gitops render                   # public repository export under gitops/
-bareplane gitops install --approve <cluster-name>
-bareplane gitops handoff --approve <cluster-name>
+bareplane render
+bareplane terraform plan
+bareplane terraform apply --approve my-cluster
 ```
 
-`gitops render` produces a reviewable export with no cluster mutation, Git commit, or push, and preserves edited or unmanaged output. `gitops install` requires completed bootstrap, fresh health, a reviewed export, and exact approval. `gitops handoff` verifies a published snapshot, pins initial root and child reconciliation, then transfers steady-state ownership to Git.
+Replace `my-cluster` with `metadata.name` from your configuration. `render` writes deterministic output to `.bareplane/terraform`. `terraform plan` creates a saved plan and SHA-256 attestation in private project state. Apply verifies the current inputs and attestation, then invalidates the attestation before mutation. Run a new plan before every further apply.
 
-## Contracts
+See [read-only planning](docs/plan.md), [Terraform rendering](docs/render.md), [saved plans](docs/terraform-plan.md), and [guarded apply](docs/terraform-apply.md).
 
-Each command's behavior is specified rather than inferred:
+## Bootstrap Kubernetes
 
-| Area | Documents |
+After provisioning the machines and configuring their SSH address mapping:
+
+```bash
+bareplane bootstrap render
+bareplane bootstrap doctor
+bareplane bootstrap check
+bareplane bootstrap trust
+bareplane bootstrap preflight
+bareplane bootstrap apply --approve my-cluster
+```
+
+Review SSH host fingerprints against the machine consoles before accepting them in `bootstrap trust`. Fresh-host preflight verifies authenticated remote prerequisites. Apply runs the owned host, Kubernetes, networking, join, kubeconfig, and health phases, recording progress for safe retries.
+
+Bareplane retains ownership of Kubernetes bootstrap, kube-vip, and Cilium. Project credentials and execution state stay under `.bareplane/`; keep that directory private and out of Git. See the [bootstrap guide](docs/bootstrap.md), [health checks](docs/bootstrap-health.md), and [recovery procedures](docs/bootstrap-recovery.md).
+
+## Hand over to GitOps
+
+Configure `spec.gitops` with an anonymous HTTPS repository, revision, and root path, then render a public export:
+
+```bash
+bareplane gitops render
+```
+
+Review the generated `gitops/` payload, copy it into your configured repository at the configured root path, and commit and publish it yourself. Rendering preserves edited or unmanaged output and performs no Git push or Kubernetes mutation.
+
+Once the reviewed payload is available remotely:
+
+```bash
+bareplane gitops install --approve my-cluster
+bareplane gitops handoff --approve my-cluster
+bareplane status
+```
+
+Install verifies fresh bootstrap health and installs the minimal pinned Argo CD control plane. Handoff verifies the published snapshot and Argo reconciliation, then transfers steady-state platform ownership to your Git repository. `status` reports local success records; use the documented health checks for live readiness.
+
+See the [GitOps contract](docs/gitops.md), [installation](docs/gitops-install.md), and [handoff](docs/gitops-handoff.md).
+
+## Select platform components
+
+The `minimal` profile starts with Argo CD. Explicit component selections can add implemented integrations with their required configuration:
+
+| Capability | Guide |
 | --- | --- |
-| Configuration | [configuration](docs/configuration.md) · [topology](docs/topology.md) · [component selection](docs/component-selection.md) |
-| Ownership | [ownership](docs/ownership.md) · [architecture](docs/architecture.md) · [platform graph](docs/platform-graph.md) |
-| Provider | [providers](docs/providers.md) · [proxmox](docs/proxmox.md) · [doctor](docs/doctor.md) · [plan](docs/plan.md) |
-| Terraform | [render](docs/render.md) · [workspace](docs/terraform-workspace.md) · [plan](docs/terraform-plan.md) · [apply](docs/terraform-apply.md) |
-| Bootstrap | [bootstrap](docs/bootstrap.md) · [preflight](docs/bootstrap-preflight.md) · [apply](docs/bootstrap-apply.md) · [health](docs/bootstrap-health.md) · [recovery](docs/bootstrap-recovery.md) · [kubernetes](docs/kubernetes.md) |
-| GitOps | [contract](docs/gitops.md) · [render](docs/gitops-render.md) · [install](docs/gitops-install.md) · [handoff](docs/gitops-handoff.md) · [status](docs/status.md) |
-| Components | [certificates](docs/certificates.md) · [kubelet TLS](docs/kubelet-tls.md) · [metrics server](docs/metrics-server.md) · [DNS](docs/dns.md) · [SOPS](docs/sops.md) |
+| Certificates and issuers | [cert-manager](docs/certificates.md) |
+| Resource metrics | [Metrics Server](docs/metrics-server.md), [kubelet serving TLS](docs/kubelet-tls.md) |
+| DNS records | [External DNS](docs/dns.md) |
+| Encrypted secret delivery | [SOPS](docs/sops.md) |
+| External secret delivery | [Vault integration](docs/vault.md) |
+| Bounded metrics and alerts | [Observability](docs/observability.md) |
+| Retained static local volumes | [Storage](docs/storage.md) |
+
+See [component selection](docs/component-selection.md) for dependency and configuration rules. AI/GPU and data profiles, broad storage systems, upgrades, and release distribution remain future work.
+
+## Command reference
+
+```bash
+bareplane help
+bareplane terraform help
+bareplane bootstrap help
+bareplane gitops help
+```
+
+Commands accept an optional configuration path; the default is `bareplane.yaml` in the current directory. Mutating workflows require exact cluster-name approval. Bareplane refuses unmanaged resources, stale saved plans, and implicit ownership adoption.
+
+For details, see [configuration](docs/configuration.md), [status](docs/status.md), [ownership](docs/ownership.md), and [architecture](docs/architecture.md).
 
 ## Development
-
-Requires Go 1.23 or newer. One direct dependency.
 
 ```bash
 make check
 make build
 ```
 
-The [v0.1 acceptance baseline](docs/acceptance.md) combines a fast mocked full lifecycle, real disposable Kubernetes and Argo jobs, and a separate operator-run Proxmox release-candidate procedure. Hosted CI is not evidence that a physical Proxmox environment passed. Check the [release checklist](docs/release-checklist.md), [compatibility record](docs/compatibility.json), and [known limitations](docs/known-limitations.md) before calling a candidate release-ready.
+`make check` verifies Go formatting, runs vet and tests, and builds all packages. CI also exercises generated Terraform and GitOps output, Python/Ansible checks, and disposable Kubernetes VMs. The [acceptance baseline](docs/acceptance.md) describes the separate operator-run Proxmox procedure required for release certification.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidance.
+Keep fixes focused and include regression coverage. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [release checklist](docs/release-checklist.md).
 
 ## License
 
-MIT
+[MIT](LICENSE)
+
