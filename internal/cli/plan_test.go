@@ -72,6 +72,28 @@ func TestRunPlanConflictsWithUnmanagedNameCollision(t *testing.T) {
 	}
 }
 
+func TestRunPlanConflictsWithOwnedNonMachineResource(t *testing.T) {
+	for _, kind := range []string{"lxc", "", "unknown"} {
+		t.Run(kind, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					t.Errorf("plan attempted mutating method %s", r.Method)
+				}
+				fmt.Fprintf(w, `{"data":[{"vmid":101,"type":%q,"name":"bareplane-control-plane-1","node":"pve1","maxcpu":4,"maxmem":8589934592,"maxdisk":68719476736,"tags":"bareplane;bareplane-cluster-bareplane"}]}`, kind)
+			}))
+			defer server.Close()
+			path := writePlanConfig(t, server.URL)
+			var stdout, stderr bytes.Buffer
+			if code := runPlan([]string{path}, &stdout, &stderr, planDeps(server)); code != planConflictExitCode {
+				t.Fatalf("owned %q resource returned %d: %s %s", kind, code, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stdout.String(), "CONFLICT") || !strings.Contains(stdout.String(), "not compatible") {
+				t.Fatalf("unexpected incompatible resource plan: %s", stdout.String())
+			}
+		})
+	}
+}
+
 func TestRunPlanReportsMissingCredentials(t *testing.T) {
 	path := writePlanConfig(t, "https://proxmox.example.com:8006")
 	var stdout, stderr bytes.Buffer

@@ -43,7 +43,7 @@ func TestRuntimeProviderDiscoverTranslatesAndSortsGuests(t *testing.T) {
 	if first.ID != "qemu/101" || first.Name != "alpha" || first.Kind != "qemu" || first.Host != "pve1" {
 		t.Fatalf("unexpected first node identity: %#v", first)
 	}
-	if first.Status != "running" || first.CPU != 8 || first.MemoryGB != 8 || first.DiskGB != 64 || first.Template {
+	if first.Status != "running" || first.CPU != 8 || first.MemoryGB != 8 || first.DiskGB != 64 || first.Template || !first.MachineCompatible {
 		t.Fatalf("unexpected first node capacity: %#v", first)
 	}
 	if !reflect.DeepEqual(first.Tags, []string{"bareplane", "gpu"}) {
@@ -56,7 +56,7 @@ func TestRuntimeProviderDiscoverTranslatesAndSortsGuests(t *testing.T) {
 	}
 
 	third := inventory.Nodes[2]
-	if third.ID != "lxc/202" || !third.Template || third.MemoryGB != 3 || third.DiskGB != 11 {
+	if third.ID != "lxc/202" || !third.Template || third.MemoryGB != 3 || third.DiskGB != 11 || third.MachineCompatible {
 		t.Fatalf("unexpected third node: %#v", third)
 	}
 	if !reflect.DeepEqual(third.Tags, []string{"alpha", "beta"}) {
