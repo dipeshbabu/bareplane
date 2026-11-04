@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="64" viewBox="0 0 360 64" role="img" aria-label="Bareplane CLI">
+  <path d="M12 17 32 32 12 47M38 47h22" fill="none" stroke="#2563eb" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="80" y="45" fill="#111827" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="36" font-weight="600">bareplane</text>
+  <text x="294" y="44" fill="#2563eb" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="25" font-weight="500">CLI</text>
+</svg>
