@@ -394,6 +394,11 @@ def main():
                             run_storage_acceptance(kubectl, REPO, work, ssh)
                         if existing_storage_mode:
                             run_existing_storage_acceptance(kubectl, REPO)
+                            run(handoff)
+                            repeated = api('get','application','lab-root','-n','argocd','-o','json')
+                            if (repeated['metadata']['uid'] != root['metadata']['uid']
+                                    or repeated['metadata']['generation'] != root['metadata']['generation']):
+                                raise RuntimeError('External storage policy caused handoff to rewrite the root')
                         if core_mode:
                             run_core_acceptance(kubectl, REPO, work, ssh, names, receipt)
                 if recovery_mode:
