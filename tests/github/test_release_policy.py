@@ -118,6 +118,19 @@ class ReleasePolicyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             policy.verify_release_policy(api, values(), NOW)
 
+    def test_settings_credential_reads_only_immutable_settings(self):
+        api = FakeAPI()
+        paths = []
+        class SettingsAPI:
+            def get(self, path):
+                paths.append(path)
+                if path != '/immutable-releases':
+                    raise AssertionError('Administration credential was used beyond its setting')
+                return dict(enabled=True)
+        request = dict(values(), RELEASE_PUBLISH='true', RELEASE_OPERATOR_EVIDENCE=json.dumps(evidence()))
+        self.assertTrue(policy.verify_release_policy(api, request, NOW, settings_api=SettingsAPI())['publish'])
+        self.assertEqual(paths, ['/immutable-releases'])
+
 
 if __name__ == '__main__':
     unittest.main()

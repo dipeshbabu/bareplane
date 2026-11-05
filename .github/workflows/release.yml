@@ -35,7 +35,6 @@ jobs:
     permissions:
       contents: read
       actions: read
-      deployments: read
     outputs:
       source_sha: ${{ steps.policy.outputs.source_sha }}
       version: ${{ steps.policy.outputs.version }}
@@ -110,7 +109,6 @@ jobs:
     permissions:
       contents: write
       actions: read
-      deployments: read
       attestations: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262

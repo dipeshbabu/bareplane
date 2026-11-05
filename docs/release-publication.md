@@ -45,7 +45,7 @@ The default `GITHUB_TOKEN` cannot read repository administration settings. Set a
 repository secret named `RELEASE_SETTINGS_TOKEN` containing a fine-grained token
 or short-lived GitHub App installation token restricted to this repository with
 **Administration: read** (and Metadata: read). It is used only to read immutable
-release/environment settings; `GITHUB_TOKEN` handles CI reads, attestations and
+release settings; `GITHUB_TOKEN` handles CI/environment reads, attestations and
 release writes. Candidate-only builds need no settings token. Missing or expired
 settings access blocks publication rather than silently skipping these checks.
 

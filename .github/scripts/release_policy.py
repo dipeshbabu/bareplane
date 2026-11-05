@@ -73,7 +73,7 @@ def verify_release_policy(api, values, now=None, settings_api=None):
             raise ValueError('Publication requires a separate read-only release-settings token with Administration read access')
         if settings_api.get('/immutable-releases').get('enabled') is not True:
             raise ValueError('Publication requires enabled immutable releases')
-        environment = settings_api.get('/environments/release')
+        environment = api.get('/environments/release')
         if not any(rule.get('type') == 'required_reviewers' and rule.get('reviewers')
                    for rule in environment.get('protection_rules', [])):
             raise ValueError('Publication requires a release environment with an explicit reviewer')
