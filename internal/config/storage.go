@@ -2,16 +2,39 @@ package config
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 )
 
-// StorageConfig explicitly inventories retained local directories. It does not
-// authorize formatting disks, dynamically creating paths, or adopting data.
+// StorageConfig selects retained local directories or a read-only external
+// class contract. It never authorizes adopting or changing external storage.
 type StorageConfig struct {
-	Strategy string        `yaml:"strategy"`
-	Volumes  []LocalVolume `yaml:"volumes"`
+	Strategy  string        `yaml:"strategy"`
+	ClassName string        `yaml:"className,omitempty"`
+	Volumes   []LocalVolume `yaml:"volumes"`
+}
+
+var storageClassLabel = regexp.MustCompile(`^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$`)
+
+func validStorageClass(value string) bool {
+	if len(value) == 0 || len(value) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(value, ".") {
+		if len(label) > 63 || !storageClassLabel.MatchString(label) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s StorageConfig) Namespace() string {
+	if s.Strategy == "existing-class" {
+		return "storage-contract"
+	}
+	return "local-storage"
 }
 
 type LocalVolume struct {
@@ -50,8 +73,20 @@ func (c Config) validateStorage() []string {
 		return nil
 	}
 	var problems []string
+	if settings.Strategy == "existing-class" {
+		if !validStorageClass(settings.ClassName) {
+			problems = append(problems, "spec.storage.className must select one existing storage class using a valid DNS subdomain")
+		}
+		if len(settings.Volumes) != 0 {
+			problems = append(problems, "spec.storage.volumes cannot be combined with the existing-class strategy")
+		}
+		return problems
+	}
 	if settings.Strategy != "local-static" {
-		problems = append(problems, "spec.storage.strategy must explicitly be local-static; dynamic provisioning and disk formatting are not supported")
+		problems = append(problems, "spec.storage.strategy must explicitly be local-static or existing-class; storage installation and disk formatting are not supported")
+	}
+	if settings.ClassName != "" {
+		problems = append(problems, "spec.storage.className requires the existing-class strategy")
 	}
 	if len(settings.Volumes) == 0 || len(settings.Volumes) > 32 {
 		return append(problems, "spec.storage.volumes must explicitly select 1 to 32 local directories")
@@ -82,7 +117,7 @@ func (c Config) validateStorage() []string {
 
 func (c Config) RequireStorage() (StorageConfig, error) {
 	if c.Spec.Storage == nil {
-		return StorageConfig{}, fmt.Errorf("storage requires explicit spec.storage.strategy and volume inventory")
+		return StorageConfig{}, fmt.Errorf("storage requires an explicit strategy and its local inventory or existing class contract")
 	}
 	if problems := c.validateStorage(); len(problems) > 0 {
 		return StorageConfig{}, &ValidationError{Problems: problems}

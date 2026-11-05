@@ -13,7 +13,7 @@ import urllib.request
 
 REQUIRED = {'Quality', 'Host preparation VM', 'Bootstrap apply VMs', 'Multi-node join VMs',
             'Bootstrap recovery VM', 'Argo installation VM', 'GitOps handoff VM', 'Core cert-manager VM', 'Kubelet serving TLS VMs',
-            'Core Metrics Server VM', 'Core DNS VM', 'Core SOPS VM', 'Core Vault VM', 'Core observability VM', 'Core local storage VM', 'Core profile VM', 'Release artifacts',
+            'Core Metrics Server VM', 'Core DNS VM', 'Core SOPS VM', 'Core Vault VM', 'Core observability VM', 'Core local storage VM', 'Core profile VM', 'Existing storage class VM', 'Release artifacts',
             'Release installation (linux-amd64)', 'Release installation (linux-arm64)',
             'Release installation (macos-amd64)', 'Release installation (macos-arm64)', 'v0.1 acceptance'}
 

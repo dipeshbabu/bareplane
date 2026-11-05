@@ -15,13 +15,16 @@ import (
 
 const StorageCheckImage = "python:3.12.14-slim-bookworm"
 
-//go:embed storage/check.py
+//go:embed storage/check.py storage/class_check.py
 var storageCheck embed.FS
 
 func renderStorage(cfg config.Config, files map[string][]byte) error {
 	settings, err := cfg.RequireStorage()
 	if err != nil {
 		return err
+	}
+	if settings.Strategy == "existing-class" {
+		return renderExistingStorage(cfg, settings, files)
 	}
 	script, err := storageCheck.ReadFile("storage/check.py")
 	if err != nil {

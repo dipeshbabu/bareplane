@@ -6,7 +6,7 @@ The optional [`spec.components` selection](component-selection.md) enables or di
 
 The optional [`spec.observability` baseline](observability.md) requires explicit ephemeral storage and bounds metrics retention and topology size.
 
-The optional [`spec.storage` inventory](storage.md) selects retained static local volumes with fixed derived paths and read-only node checks. It does not authorize disk formatting or implicit data adoption.
+The optional [`spec.storage` settings](storage.md) select retained static local volumes with read-only node checks, or inspect one existing dynamic StorageClass without taking ownership. The strategy and inventory or class name must be explicit.
 
 The optional [`spec.secrets.sops` integration](sops.md) accepts only operator key references and an explicit namespace allowlist; no private key or secret value belongs in this configuration.
 

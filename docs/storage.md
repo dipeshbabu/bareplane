@@ -1,4 +1,60 @@
-# Explicit static local storage
+# Storage
+
+Select either retained local directories or an existing dynamic StorageClass.
+Both strategies require explicit configuration. Bareplane does not install a
+CSI driver, select a default class, format disks or create workload claims.
+
+## Existing dynamic class
+
+For persistent data services, use an operator-managed CSI class and backups in
+an off-host S3-compatible bucket. Keep the bucket and credentials separate from
+the cluster's storage failure domain. The current integration checks the class
+contract only; database operators, backup scheduling and restore workflows are
+not implemented by this strategy.
+
+```yaml
+spec:
+  storage:
+    strategy: existing-class
+    className: data-retained
+```
+
+The block selects `storage`; `volumes` cannot be combined with this strategy.
+Install and validate the CSI backend separately before handoff. The selected
+class must exist, use a dynamic provisioner, explicitly set `reclaimPolicy:
+Retain` and `allowVolumeExpansion: true`, and use `Immediate` or
+`WaitForFirstConsumer` binding. Bareplane refuses a missing, deleting, static or
+incompatible class. It never edits the class to make it pass.
+
+Argo owns an isolated `storage-contract` namespace and a one-time inspection
+Job. The Job runs as a non-root user with a read-only root filesystem and no
+host or workload volume mounts. Its service account can only `get` the named
+StorageClass, and its network policy permits only Kubernetes API traffic. The
+request verifies the API's projected CA; credentials and API response bodies
+are not written to logs.
+
+A successful Job records the class metadata contract at that point in time.
+It does not allocate a PVC, contact the CSI controller, exercise expansion,
+verify replication, establish backend health or prove recovery. A completed
+Job is retained and ordinary Argo refreshes do not rerun it. Workload owners
+must explicitly select this class in their PVCs and separately test provisioning,
+application writes, node failure, expansion and restore before using it for
+production data. `Retain` preserves released volumes; it is not a backup.
+
+For an initial refusal, inspect its fixed reason and correct the operator-owned
+prerequisite. After reviewing the external class identity, deliberately remove
+only the failed inspection Job and retry through its Argo owner. Preserve
+successful records and existing claims/data. Changing strategies is a storage
+migration and requires a separate reviewed procedure; do not remove the old
+inventory to bypass retention.
+
+The [example configuration](../examples/existing-storage-fixture.yaml) and
+[GitOps root](../examples/gitops/existing-storage-root) show this contract. CI
+uses an explicitly synthetic, non-provisioning class to test refusal, retry,
+effective read-only RBAC and preservation of external identity. It does not
+certify a CSI backend.
+
+## Retained static local storage
 
 The minimal storage strategy is an explicit inventory of **retained node-local
 directories**. Kubernetes provides the Local PersistentVolume implementation;

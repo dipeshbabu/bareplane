@@ -13,14 +13,16 @@ class ComponentAcceptance:
     def __init__(self, kubectl, repository, component):
         if os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('BAREPLANE_DISPOSABLE_VM') != '1':
             raise RuntimeError('Component acceptance is restricted to disposable GitHub runners')
-        if component not in {'cert-manager', 'metrics-server', 'external-dns', 'secrets-sops', 'vault', 'observability', 'storage'}:
+        if component not in {'cert-manager', 'metrics-server', 'external-dns', 'secrets-sops', 'vault', 'observability', 'storage', 'storage-existing'}:
             raise RuntimeError('Unknown disposable component fixture')
-        self.kubectl, self.namespace, self.name = kubectl, {'vault': 'vault-secrets', 'storage': 'local-storage'}.get(component, component), 'lab-' + component
+        logical = 'storage' if component == 'storage-existing' else component
+        fixture = 'existing-storage' if component == 'storage-existing' else component
+        self.kubectl, self.namespace, self.name = kubectl, {'vault': 'vault-secrets', 'storage': 'local-storage', 'storage-existing': 'storage-contract'}.get(component, component), 'lab-' + logical
         self.revision = os.environ.get('BAREPLANE_TEST_GIT_REF', '')
         source_repo = os.environ.get('BAREPLANE_TEST_GIT_REPO', '')
         if not re.fullmatch('[0-9a-f]{40}', self.revision) or not re.fullmatch(r'https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\.git', source_repo):
             raise RuntimeError('Component acceptance requires an exact public source revision')
-        path = repository / ('examples/gitops/' + component + '-root/applications/' + component + '.yaml')
+        path = repository / ('examples/gitops/' + fixture + '-root/applications/' + logical + '.yaml')
         self.app = yaml.safe_load(path.read_bytes())
         self.app['spec']['source'].update(repoURL=source_repo, targetRevision=self.revision)
 
