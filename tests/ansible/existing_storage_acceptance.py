@@ -17,6 +17,33 @@ def wait_for(predicate, message, timeout=240):
         time.sleep(2)
 
 
+def replace_source(api, component, uid, desired):
+    expected = component.app['spec']['source']
+    # Argo writes status while its failed inspection is being repaired. Keep
+    # the compare-and-swap boundary, but reread it after a bounded conflict.
+    for attempt in range(5):
+        current = api('get','application',component.name,'-n','argocd','-o','json')
+        metadata = current.get('metadata', {})
+        source = current.get('spec', {}).get('source')
+        if metadata.get('uid') != uid or metadata.get('deletionTimestamp') or source not in (expected, desired):
+            raise RuntimeError('External class retry application identity or approved source changed')
+        if source == desired:
+            return  # A prior request succeeded but its response was lost.
+        if not metadata.get('resourceVersion'):
+            raise RuntimeError('External class retry application has no concurrency identity')
+        try:
+            api('patch','application',component.name,'-n','argocd','--type=json','-p',json.dumps([
+                dict(op='test',path='/metadata/uid',value=uid),
+                dict(op='test',path='/metadata/resourceVersion',value=metadata['resourceVersion']),
+                dict(op='test',path='/spec/source',value=expected),
+                dict(op='replace',path='/spec/source',value=desired)]),'-o','json')
+            return
+        except RuntimeError:
+            if attempt == 4:
+                raise
+            time.sleep(0.5)
+
+
 def run_existing_storage_acceptance(kubectl, repository):
     component = ComponentAcceptance(kubectl, repository, 'storage-existing')
     api = component.api
@@ -68,12 +95,7 @@ def run_existing_storage_acceptance(kubectl, repository):
     source['kustomize'] = dict(patches=[dict(target=dict(group='batch',version='v1',kind='Job',name=job_name),
         patch=json.dumps(dict(apiVersion='batch/v1',kind='Job',metadata=dict(name=job_name,
             annotations={'ci.bareplane.io/explicit-retry':'prepared'}))))])
-    current_app = api('get','application',component.name,'-n','argocd','-o','json')
-    api('patch','application',component.name,'-n','argocd','--type=json','-p',json.dumps([
-        dict(op='test',path='/metadata/uid',value=app_uid),
-        dict(op='test',path='/metadata/resourceVersion',value=current_app['metadata']['resourceVersion']),
-        dict(op='test',path='/spec/source',value=component.app['spec']['source']),
-        dict(op='replace',path='/spec/source',value=source)]),'-o','json')
+    replace_source(api, component, app_uid, source)
     component.app['spec']['source'] = source
     component.wait_application()
     if job().get('status',{}).get('succeeded') != 1:

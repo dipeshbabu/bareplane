@@ -4,9 +4,12 @@ import io
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 import urllib.error
+
+from existing_storage_acceptance import replace_source
 
 SOURCE = Path(__file__).resolve().parents[2] / 'internal/render/gitops/storage/class_check.py'
 spec = importlib.util.spec_from_file_location('existing_storage_check', SOURCE)
@@ -77,6 +80,56 @@ class ExistingStorageContractTests(unittest.TestCase):
         with self.assertRaises(storage.Refusal) as raised:
             storage.NoRedirect().redirect_request(None,None,302,'PRIVATE-SENTINEL',{},'https://other/PRIVATE-SENTINEL')
         self.assertNotIn('PRIVATE-SENTINEL',str(raised.exception))
+
+
+class RetrySourceOwnershipTests(unittest.TestCase):
+    def setUp(self):
+        self.original = dict(repoURL='https://github.com/example/git.git', targetRevision='a'*40, path='components/storage-existing')
+        self.desired = dict(self.original, kustomize=dict(patches=[]))
+        self.component = SimpleNamespace(name='lab-storage', app=dict(spec=dict(source=self.original)))
+
+    def test_status_conflict_rereads_resource_version_without_weakening_ownership(self):
+        calls = []
+        def api(verb, *_args):
+            if verb == 'get':
+                return dict(metadata=dict(uid='owned',resourceVersion=str(len(calls)+1)),spec=dict(source=self.original))
+            operations = json.loads(_args[_args.index('-p')+1])
+            calls.append(operations)
+            if len(calls) == 1:
+                raise RuntimeError('status changed')
+            return {}
+        with patch('existing_storage_acceptance.time.sleep'):
+            replace_source(api,self.component,'owned',self.desired)
+        self.assertEqual(len(calls),2)
+        self.assertEqual([op['value'] for op in calls[0] if op['path']=='/metadata/resourceVersion'],['1'])
+        self.assertEqual([op['value'] for op in calls[1] if op['path']=='/metadata/resourceVersion'],['2'])
+        for operations in calls:
+            self.assertIn(dict(op='test',path='/metadata/uid',value='owned'),operations)
+            self.assertIn(dict(op='test',path='/spec/source',value=self.original),operations)
+
+    def test_replaced_or_redirected_application_is_never_patched(self):
+        for metadata,source in [(dict(uid='other',resourceVersion='1'),self.original),
+                                (dict(uid='owned',resourceVersion='1',deletionTimestamp='now'),self.original),
+                                (dict(uid='owned',resourceVersion='1'),dict(self.original,path='unrelated'))]:
+            calls=[]
+            def api(verb,*_args):
+                calls.append(verb)
+                return dict(metadata=metadata,spec=dict(source=source))
+            with self.assertRaises(RuntimeError):
+                replace_source(api,self.component,'owned',self.desired)
+            self.assertEqual(calls,['get'])
+
+    def test_ambiguously_accepted_change_is_verified_before_retry(self):
+        current = dict(metadata=dict(uid='owned',resourceVersion='1'),spec=dict(source=self.original))
+        patches=[]
+        def api(verb,*_args):
+            if verb == 'get':return copy.deepcopy(current)
+            patches.append(verb)
+            current['spec']['source'] = self.desired
+            raise RuntimeError('response lost')
+        with patch('existing_storage_acceptance.time.sleep'):
+            replace_source(api,self.component,'owned',self.desired)
+        self.assertEqual(patches,['patch'])
 
 
 if __name__=='__main__':unittest.main()
