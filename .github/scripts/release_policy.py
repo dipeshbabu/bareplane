@@ -49,7 +49,10 @@ def validate_context(values, default_branch, now=None):
     reference = json.loads((ROOT / 'docs/compatibility.json').read_bytes())['proxmox_reference']
     if not isinstance(evidence['proxmox_version'], str) or not re.fullmatch(re.escape(reference) + r'(?:\.[0-9]+)?', evidence['proxmox_version']):
         raise ValueError('Operator evidence must identify the reviewed Proxmox reference version')
-    tested = dt.datetime.strptime(evidence['tested_at'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=dt.timezone.utc)
+    try:
+        tested = dt.datetime.strptime(evidence['tested_at'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=dt.timezone.utc)
+    except (TypeError, ValueError):
+        raise ValueError('Operator evidence requires a valid UTC test timestamp; input values were not exposed') from None
     age = now - tested
     if age < dt.timedelta(minutes=-5) or age > dt.timedelta(days=7):
         raise ValueError('Operator evidence is future-dated or older than seven days')

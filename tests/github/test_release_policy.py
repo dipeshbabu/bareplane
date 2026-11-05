@@ -131,6 +131,13 @@ class ReleasePolicyTests(unittest.TestCase):
         self.assertTrue(policy.verify_release_policy(api, request, NOW, settings_api=SettingsAPI())['publish'])
         self.assertEqual(paths, ['/immutable-releases'])
 
+    def test_invalid_timestamp_never_echoes_private_input(self):
+        request = dict(values(), RELEASE_PUBLISH='true',
+                       RELEASE_OPERATOR_EVIDENCE=json.dumps(dict(evidence(), tested_at='PRIVATE-SENTINEL')))
+        with self.assertRaises(ValueError) as raised:
+            policy.verify_release_policy(FakeAPI(), request, NOW)
+        self.assertNotIn('PRIVATE-SENTINEL', str(raised.exception))
+
 
 if __name__ == '__main__':
     unittest.main()
