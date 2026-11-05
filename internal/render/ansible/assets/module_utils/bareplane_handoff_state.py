@@ -319,7 +319,15 @@ def verify_cilium_excluded(client, applications):
     for app in applications:
         for resource in app.get('status', {}).get('resources', []):
             group, kind, name = resource.get('group', ''), resource.get('kind', ''), resource.get('name', '')
-            owned = group == 'cilium.io' or (kind == 'CustomResourceDefinition' and name.endswith('.cilium.io'))
+            # The explicit external-storage inspector owns one namespaced API
+            # egress policy. This policy does not transfer ownership of the
+            # bootstrap CNI, its CRDs, controllers or cluster-wide resources.
+            storage_policy = (group == 'cilium.io' and kind == 'CiliumNetworkPolicy'
+                              and name == 'storage-contract-api' and resource.get('namespace') == 'storage-contract'
+                              and app.get('metadata', {}).get('annotations', {}).get('bareplane.io/component') == 'storage'
+                              and app.get('spec', {}).get('source', {}).get('path') == 'components/storage-existing'
+                              and app.get('spec', {}).get('destination', {}).get('namespace') == 'storage-contract')
+            owned = (group == 'cilium.io' and not storage_policy) or (kind == 'CustomResourceDefinition' and name.endswith('.cilium.io'))
             owned = owned or (group in {'', 'apps', 'rbac.authorization.k8s.io'} and
                               (name == 'cilium' or name.startswith('cilium-') or name.startswith('sh.helm.release.v1.bareplane-cilium.')))
             require(not owned, 'An Argo Application claims bootstrap-owned Cilium resources')

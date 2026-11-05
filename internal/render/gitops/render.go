@@ -59,6 +59,10 @@ func Render(cfg config.Config) (map[string][]byte, error) {
 	}
 	files := make(map[string][]byte)
 	for _, component := range components {
+		payloadRoot := "components/" + component.ID
+		if component.ID == "storage" && cfg.Spec.Storage != nil && cfg.Spec.Storage.Strategy == "existing-class" {
+			payloadRoot = "components/storage-existing"
+		}
 		if err := fs.WalkDir(assets, "assets/"+component.ID, func(name string, entry fs.DirEntry, walkErr error) error {
 			if walkErr != nil || entry.IsDir() {
 				return walkErr
@@ -70,7 +74,7 @@ func Render(cfg config.Config) (map[string][]byte, error) {
 			// Asset placeholders are standalone annotation scalars, not embedded
 			// inside scripts or already-quoted values (covered by an invariant test).
 			data = []byte(strings.ReplaceAll(strings.ReplaceAll(string(data), "\r\n", "\n"), "BAREPLANE_CLUSTER_NAME", clusterScalar))
-			files["components/"+strings.TrimPrefix(name, "assets/")] = data
+			files[path.Join(payloadRoot, strings.TrimPrefix(name, "assets/"+component.ID+"/"))] = data
 			return nil
 		}); err != nil {
 			return nil, fmt.Errorf("implemented component %s has no usable embedded payload: %w", component.ID, err)
@@ -122,7 +126,11 @@ func Render(cfg config.Config) (map[string][]byte, error) {
 		name := "applications/" + component.ID + ".yaml"
 		componentNames = append(componentNames, component.ID)
 		resources = append(resources, name)
-		objects[path.Join(root, name)] = application(cfg, component.ID, "components/"+component.ID, strconv.Itoa(component.Wave), component.Namespace)
+		sourcePath := "components/" + component.ID
+		if component.ID == "storage" && cfg.Spec.Storage != nil && cfg.Spec.Storage.Strategy == "existing-class" {
+			sourcePath = "components/storage-existing"
+		}
+		objects[path.Join(root, name)] = application(cfg, component.ID, sourcePath, strconv.Itoa(component.Wave), component.Namespace)
 	}
 	objects[path.Join(root, "kustomization.yaml")] = kustomization(resources...)
 	for name, obj := range objects {

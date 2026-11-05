@@ -50,7 +50,18 @@ func (c Config) ResolvePlatform() (platform.Resolution, error) {
 	if err != nil {
 		return platform.Resolution{}, err
 	}
-	return registry.Resolve(c.PlatformSelection())
+	resolved, err := registry.Resolve(c.PlatformSelection())
+	if err != nil {
+		return platform.Resolution{}, err
+	}
+	if c.Spec.Storage != nil {
+		for index := range resolved.Components {
+			if resolved.Components[index].ID == "storage" {
+				resolved.Components[index].Namespace = c.Spec.Storage.Namespace()
+			}
+		}
+	}
+	return resolved, nil
 }
 
 func (c Config) validateComponents() []string {

@@ -26,6 +26,8 @@ from cert_manager_acceptance import certificate_resources
 SCHEMAS = "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/07b64c5376535fbbd6fb9910621e1a41f7613c14/{{.NormalizedKubernetesVersion}}-standalone{{.StrictSuffix}}/{{.ResourceKind}}{{.KindSuffix}}.json"
 CRD_OPENAPI = "https://raw.githubusercontent.com/kubernetes/kubernetes/v1.36.4/api/openapi-spec/v3/apis__apiextensions.k8s.io__v1_openapi.json"
 CRD_OPENAPI_SHA256 = "1c7dd621bece6661867bcc29471f774a46b36c02567d59815c7c72f6d08aa512"
+CILIUM_POLICY_CRD = "https://raw.githubusercontent.com/cilium/cilium/v1.20.1/pkg/k8s/apis/cilium.io/client/crds/v2/ciliumnetworkpolicies.yaml"
+CILIUM_POLICY_SHA256 = "62c6de8f358da125b94468d39187edb1cea157d79503fdc50ccec8a6aaa79a76"
 CONFIG = """apiVersion: bareplane.io/v1alpha1
 kind: BareplaneCluster
 metadata:
@@ -307,6 +309,28 @@ def main():
         assert host_mount['readOnly'] is True and host_mount['recursiveReadOnly'] == 'Enabled'
         pv = next(obj for obj in storage_docs if obj['kind'] == 'PersistentVolume')
         assert pv['spec']['persistentVolumeReclaimPolicy'] == 'Retain'
+        existing_root = root / 'existing-storage'
+        existing_root.mkdir()
+        existing_config = yaml.safe_load((Path(__file__).resolve().parents[2] / 'examples/existing-storage-fixture.yaml').read_bytes())
+        existing_config['spec']['storage']['className'] = 'false'
+        existing_path = existing_root / 'bareplane.yaml'
+        existing_path.write_text(yaml.safe_dump(existing_config), encoding='utf-8')
+        run([bareplane, 'gitops', 'render', str(existing_path)])
+        existing_export = existing_root / 'gitops'
+        existing_docs = list(yaml.safe_load_all(run([kubectl, 'kustomize', str(existing_export / 'components/storage-existing')])))
+        assert not any(obj['kind'] in {'StorageClass', 'PersistentVolume', 'PersistentVolumeClaim', 'Secret'} for obj in existing_docs)
+        with urllib.request.urlopen(CILIUM_POLICY_CRD, timeout=30) as response:
+            raw_policy = response.read(5 * 1024 * 1024 + 1)
+        assert len(raw_policy) <= 5 * 1024 * 1024 and hashlib.sha256(raw_policy).hexdigest() == CILIUM_POLICY_SHA256
+        definition = yaml.safe_load(raw_policy)
+        policy_schema = next(v['schema']['openAPIV3Schema'] for v in definition['spec']['versions'] if v['name'] == 'v2')
+        custom_validators['cilium.io/v2', 'CiliumNetworkPolicy'] = jsonschema.Draft4Validator(strict_schema(copy.deepcopy(policy_schema)))
+        custom_resources += [obj for obj in existing_docs if obj['kind'] == 'CiliumNetworkPolicy']
+        documents += [obj for obj in existing_docs if obj['kind'] != 'CiliumNetworkPolicy']
+        existing_apps = list(yaml.safe_load_all(run([kubectl, 'kustomize', str(existing_export / existing_config['spec']['gitops']['rootPath'])])))
+        for app in existing_apps:
+            validator.validate(app)
+        applications += existing_apps
         for kind in ['SecretStore', 'ExternalSecret']:
             script = vault_configmap['data']['resource.customizations.health.external-secrets.io_' + kind]
             for status, expected in [('True', 'Healthy'), ('False', 'Degraded'), ('Unknown', 'Progressing')]:

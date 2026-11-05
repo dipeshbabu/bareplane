@@ -2,6 +2,67 @@ package config
 
 import "testing"
 
+func TestExistingStorageClassContractIsExplicitAndExclusive(t *testing.T) {
+	cfg := storageConfigFixture()
+	cfg.Spec.Storage = &StorageConfig{Strategy: "existing-class", ClassName: "fast.data-csi"}
+	settings, err := cfg.RequireStorage()
+	if err != nil || settings.Namespace() != "storage-contract" || len(settings.Volumes) != 0 {
+		t.Fatal(settings, err)
+	}
+	for name, mutate := range map[string]func(*StorageConfig){
+		"missing class": func(s *StorageConfig) { s.ClassName = "" },
+		"path class":    func(s *StorageConfig) { s.ClassName = "../other" },
+		"URL class":     func(s *StorageConfig) { s.ClassName = "https://other" },
+		"uppercase":     func(s *StorageConfig) { s.ClassName = "Other" },
+		"empty label":   func(s *StorageConfig) { s.ClassName = "a..b" },
+		"mixed inventory": func(s *StorageConfig) {
+			s.Volumes = []LocalVolume{{Name: "data", Node: "lab-control-1", CapacityGiB: 1}}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			value := settings
+			mutate(&value)
+			cfg.Spec.Storage = &value
+			if _, err := cfg.RequireStorage(); err == nil {
+				t.Fatal("invalid existing class contract accepted")
+			}
+		})
+	}
+	local := storageConfigFixture()
+	local.Spec.Storage.ClassName = "external"
+	if _, err := local.RequireStorage(); err == nil {
+		t.Fatal("local inventory accepted an external class selector")
+	}
+}
+
+func TestExistingStorageNamespaceDoesNotChangeRegistryOrMinimalDefaults(t *testing.T) {
+	cfg := storageConfigFixture()
+	cfg.Spec.Storage = &StorageConfig{Strategy: "existing-class", ClassName: "fast-data"}
+	resolved, err := cfg.ResolvePlatform()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, component := range resolved.Components {
+		if component.ID == "storage" {
+			found = component.Namespace == "storage-contract"
+		}
+	}
+	if !found {
+		t.Fatal("external class inspection did not use its restricted namespace")
+	}
+	local := storageConfigFixture()
+	resolved, err = local.ResolvePlatform()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, component := range resolved.Components {
+		if component.ID == "storage" && component.Namespace != "local-storage" {
+			t.Fatal("external configuration mutated another resolution")
+		}
+	}
+}
+
 func storageConfigFixture() Config {
 	return Config{Metadata: Metadata{Name: "lab"}, Spec: Spec{Nodes: []NodeGroup{{Name: "control", Count: 1, DiskGB: 24}},
 		Storage: &StorageConfig{Strategy: "local-static", Volumes: []LocalVolume{{Name: "data", Node: "lab-control-1", CapacityGiB: 1}}}}}

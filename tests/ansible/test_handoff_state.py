@@ -33,6 +33,43 @@ with patch.dict(sys.modules, {'ansible': types.ModuleType('ansible'), 'ansible.m
     handoff = load('handoff_state', 'internal/render/ansible/assets/module_utils/bareplane_handoff_state.py')
 
 
+class ExistingStorageOwnershipTests(unittest.TestCase):
+    def test_cold_handoff_never_probes_or_adopts_the_external_class(self):
+        resources = list(yaml.safe_load_all((ROOT / 'components/storage-existing/resources.yaml').read_bytes()))
+        calls=[]
+        client = types.SimpleNamespace(json=lambda *args: calls.append(args) or {})
+        handoff.verify_new_component_absence(client, resources)
+        self.assertEqual({args[1] for args in calls}, {'Namespace','ClusterRole','ClusterRoleBinding'})
+        self.assertTrue(all(args[0]=='get' for args in calls))
+
+    def test_only_the_exact_namespaced_storage_policy_is_excluded_from_cni_ownership(self):
+        client = types.SimpleNamespace(json=lambda *_args: dict(metadata=dict(uid='bootstrap-cilium')))
+        app = yaml.safe_load((ROOT / 'examples/gitops/existing-storage-root/applications/storage.yaml').read_bytes())
+        resource = dict(group='cilium.io',kind='CiliumNetworkPolicy',name='storage-contract-api',namespace='storage-contract')
+        app['status'] = dict(resources=[resource])
+        handoff.verify_cilium_excluded(client,[app])
+        for key,value in [('kind','CiliumClusterwideNetworkPolicy'),('kind','CiliumNode'),
+                          ('name','unrelated'),('namespace','kube-system')]:
+            changed=copy.deepcopy(app)
+            changed['status']['resources'][0][key]=value
+            with self.subTest(key=key,value=value),self.assertRaises(git.GitOpsError):
+                handoff.verify_cilium_excluded(client,[changed])
+        for field,value in [('source',dict(path='components/unrelated')),('destination',dict(namespace='kube-system'))]:
+            changed=copy.deepcopy(app)
+            changed['spec'][field]=value
+            with self.subTest(field=field),self.assertRaises(git.GitOpsError):
+                handoff.verify_cilium_excluded(client,[changed])
+        for resource in [dict(group='apiextensions.k8s.io',kind='CustomResourceDefinition',name='ciliumnodes.cilium.io'),
+                         dict(group='apps',kind='DaemonSet',name='cilium',namespace='kube-system')]:
+            changed=copy.deepcopy(app)
+            changed['status']['resources']=[resource]
+            with self.assertRaises(git.GitOpsError):
+                handoff.verify_cilium_excluded(client,[changed])
+        owned = types.SimpleNamespace(json=lambda *_args: dict(metadata=dict(annotations={'argocd.argoproj.io/tracking-id':'foreign'})))
+        with self.assertRaises(git.GitOpsError):
+            handoff.verify_cilium_excluded(owned,[app])
+
+
 class NewComponentOwnershipTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

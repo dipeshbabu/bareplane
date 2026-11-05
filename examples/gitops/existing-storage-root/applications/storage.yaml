@@ -1,0 +1,37 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+    annotations:
+        argocd.argoproj.io/sync-wave: "-20"
+        bareplane.io/cluster: lab
+        bareplane.io/component: storage
+    name: lab-storage
+    namespace: argocd
+spec:
+    destination:
+        namespace: storage-contract
+        server: https://kubernetes.default.svc
+    ignoreDifferences:
+        - jsonPointers:
+            - /spec/claimRef
+          kind: PersistentVolume
+    project: default
+    source:
+        path: components/storage-existing
+        repoURL: https://github.com/dipeshbabu/bareplane.git
+        targetRevision: main
+    syncPolicy:
+        automated:
+            allowEmpty: false
+            prune: false
+            selfHeal: false
+        retry:
+            backoff:
+                duration: 5s
+                maxDuration: 1m
+            limit: 5
+        syncOptions:
+            - ServerSideApply=true
+            - FailOnSharedResource=true
+            - DisableClientSideApplyMigration=true
+            - RespectIgnoreDifferences=true

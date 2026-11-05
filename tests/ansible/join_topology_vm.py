@@ -22,6 +22,7 @@ from sops_acceptance import run_sops_acceptance
 from observability_acceptance import run_observability_acceptance
 from vault_acceptance import run_vault_acceptance
 from storage_acceptance import run_storage_acceptance
+from existing_storage_acceptance import run_existing_storage_acceptance
 from argo_receipt import verify_installation_rerun
 from gitops_retry import run_handoff_with_branch_retry
 from vm_resources import failure_diagnostics, host_counters
@@ -82,9 +83,10 @@ def main():
     observability_mode = os.environ.get('BAREPLANE_TEST_OBSERVABILITY') == '1'
     vault_mode = os.environ.get('BAREPLANE_TEST_VAULT') == '1'
     storage_mode = os.environ.get('BAREPLANE_TEST_LOCAL_STORAGE') == '1'
+    existing_storage_mode = os.environ.get('BAREPLANE_TEST_EXISTING_STORAGE') == '1'
     core_mode = os.environ.get('BAREPLANE_TEST_CORE_PROFILE') == '1'
     cert_manager_mode = os.environ.get('BAREPLANE_TEST_CERT_MANAGER') == '1' or metrics_mode
-    handoff_mode = os.environ.get('BAREPLANE_TEST_GITOPS_HANDOFF') == '1' or cert_manager_mode or dns_mode or sops_mode or vault_mode or observability_mode or storage_mode or core_mode
+    handoff_mode = os.environ.get('BAREPLANE_TEST_GITOPS_HANDOFF') == '1' or cert_manager_mode or dns_mode or sops_mode or vault_mode or observability_mode or storage_mode or core_mode or existing_storage_mode
     argocd_mode = os.environ.get('BAREPLANE_TEST_ARGOCD_INSTALL') == '1' or handoff_mode
     single_mode = recovery_mode or argocd_mode
     guests = []
@@ -390,6 +392,13 @@ def main():
                             run_vault_acceptance(kubectl, REPO, work)
                         if storage_mode:
                             run_storage_acceptance(kubectl, REPO, work, ssh)
+                        if existing_storage_mode:
+                            run_existing_storage_acceptance(kubectl, REPO)
+                            run(handoff)
+                            repeated = api('get','application','lab-root','-n','argocd','-o','json')
+                            if (repeated['metadata']['uid'] != root['metadata']['uid']
+                                    or repeated['metadata']['generation'] != root['metadata']['generation']):
+                                raise RuntimeError('External storage policy caused handoff to rewrite the root')
                         if core_mode:
                             run_core_acceptance(kubectl, REPO, work, ssh, names, receipt)
                 if recovery_mode:
