@@ -69,6 +69,6 @@ change that runtime guard.
 A passing artifact build is one prerequisite. It does not certify a physical
 Proxmox lab or authorize stable publication. The
 [release checklist](release-checklist.md), exact-source CI gate, provenance policy
-and operator evidence remain mandatory for the release decision. Never create
+and [publication approval](release-publication.md) remain mandatory for the release decision. Never create
 successful hardware evidence from mocked tests, hosted Kubernetes VMs or a local
 CUDA smoke test.
