@@ -34,7 +34,7 @@ go build -o bin/bareplane ./cmd/bareplane
 
 Add `bin` to your `PATH` to use `bareplane` from your project directory. From this checkout, you can also use `go run ./cmd/bareplane`.
 
-Bareplane is in early development. Packaged releases are planned. Infrastructure and bootstrap execution require a supported Linux or WSL controller; check the [toolchain requirements](docs/compatibility.json) and [known limitations](docs/known-limitations.md).
+Bareplane is in early development. See [binary installation and Homebrew packaging](docs/installation.md) for the verified-candidate and approved-release boundaries. Infrastructure and bootstrap execution require a supported Linux or WSL controller; check the [toolchain requirements](docs/compatibility.json) and [known limitations](docs/known-limitations.md).
 
 ## Create A Project
 

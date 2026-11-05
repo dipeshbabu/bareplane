@@ -91,7 +91,7 @@ def publish(directory, values, api, run_gh=gh, settings_api=None):
                      '--signer-workflow', REPOSITORY + '/' + WORKFLOW, '--source-digest', policy['source_sha'],
                      '--source-ref', 'refs/heads/' + policy['default_branch'], '--deny-self-hosted-runners']
         run_gh(arguments + ['--predicate-type', 'https://slsa.dev/provenance/v1'])
-        if filename.endswith('.tar.gz'):
+        if filename.endswith(('.tar.gz', '_installer.pyz')):
             run_gh(arguments + ['--predicate-type', 'https://spdx.dev/Document'])
     encoded = urllib.parse.quote(tag, safe='')
     require(api.request('GET', '/git/ref/tags/' + encoded, missing=True) is None, 'Version tag already exists; overwriting is refused')

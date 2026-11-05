@@ -1,6 +1,6 @@
 # Proxmox
 
-Bareplane's Proxmox runtime client is read only at this stage. It uses the native Proxmox HTTPS API for discovery and health information while infrastructure mutation remains out of scope until the provisioning layer is implemented.
+Bareplane's native Proxmox client uses the HTTPS API for read-only discovery and health information. Provisioning runs through the separate [guarded Terraform workflow](terraform-apply.md), which requires a current saved plan and explicit cluster-name approval.
 
 ## Endpoint
 
@@ -25,7 +25,7 @@ export BAREPLANE_PROXMOX_TOKEN_SECRET='...'
 
 Bareplane sends these using Proxmox's `PVEAPIToken` authorization header. The token secret is redacted from API error messages before they are returned to callers.
 
-Use a dedicated API token with the minimum privileges required for the operation. The current client only exposes read operations.
+Use a dedicated API token with the minimum privileges required for the operation. Native discovery is read only; Terraform provisioning requires the permissions for the reviewed plan.
 
 ## Read-only discovery
 

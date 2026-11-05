@@ -13,7 +13,7 @@ jobs:
   acceptance:
     name: v0.1 acceptance
     if: always()
-    needs: [quality, host-prepare, join-topology, release-artifacts]
+    needs: [quality, host-prepare, join-topology, release-artifacts, release-install]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,6 +21,45 @@ jobs:
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: python .github/scripts/ci_acceptance_gate.py
+
+  release-install:
+    name: Release installation (${{ matrix.target }})
+    needs: release-artifacts
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            runner: ubuntu-24.04
+            homebrew: ''
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            homebrew: ''
+          - target: macos-arm64
+            runner: macos-15
+            homebrew: --homebrew
+          - target: macos-amd64
+            runner: macos-15-intel
+            homebrew: --homebrew
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-preview-${{ github.sha }}
+          path: ${{ runner.temp }}/release
+      - name: Verify native installation, ownership refusals and formula lifecycle
+        env:
+          HOMEBREW_SMOKE: ${{ matrix.homebrew }}
+        run: |
+          python -m unittest discover -s tests/release -p 'test_*.py'
+          python hack/install_smoke.py "$RUNNER_TEMP/release" $HOMEBREW_SMOKE
 
   release-artifacts:
     name: Release artifacts
